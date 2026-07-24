@@ -983,10 +983,21 @@ if (typeof document !== 'undefined') {
     machine: createMachine(Date.now() & 0x7fffffff),
     round: 0, g: null, auto: false, speed: 500,
     tingMode: false, tingSelect: null, timer: null,
-    betIdx: 0, charIdx: 0, autoNext: false,
+    betIdx: 0, charIdx: 0, diffKey: 'normal', autoNext: false,
   };
-  function curChar() { return CHARS[S.charIdx]; }
-  function curBet() { return curChar().bets[S.betIdx]; }
+  function curChar() { return CHARS[S.charIdx]; }        // pure skin
+  function curDiff() { return DIFFS[S.diffKey]; }        // skill set + min stake
+  function curBet() { return BET_LADDER[S.betIdx]; }     // global stake ladder
+  function minBetIdx() { return BET_LADDER.findIndex(b => b >= curDiff().minBet); }
+  // reveal tiles by ABSOLUTE stake (only applied when difficulty unlocks reveal)
+  function revealForBet(bet) {
+    if (bet >= 10000) return 9;
+    if (bet >= 5000) return 7;
+    if (bet >= 2000) return 5;
+    if (bet >= 1000) return 3;
+    if (bet >= 500) return 1;
+    return 0;
+  }
   const $ = id => document.getElementById(id);
 
   function tileLabel(t) {
@@ -1006,9 +1017,10 @@ if (typeof document !== 'undefined') {
     S.round++;
     const dealer = (S.round % 2 === 1) ? 0 : 1;
     const seed = nextGameSeed(S.machine, dealer);
-    const ch = curChar();
-    const sk = Object.assign({}, ch.skill, { revealN: ch.reveals[S.betIdx] });
-    S.g = newGame(seed, dealer, ch.bets[S.betIdx], sk);
+    const diff = curDiff();
+    const bet = curBet();
+    const sk = Object.assign({}, diff.skill, { revealN: diff.skill.reveal ? revealForBet(bet) : 0 });
+    S.g = newGame(seed, dealer, bet, sk);
     S.tingMode = false;
     showOppChar();
     hideOverlay();
@@ -1031,32 +1043,34 @@ if (typeof document !== 'undefined') {
     renderBetSel();
   }
   function renderBetSel() {
-    const ch = curChar();
-    if (S.betIdx >= ch.bets.length) S.betIdx = ch.bets.length - 1; // safety on char switch
-    const bet = ch.bets[S.betIdx];
+    const diff = curDiff();
+    const floor = minBetIdx();
+    if (S.betIdx < floor) S.betIdx = floor;          // clamp stake to the difficulty's floor
+    const bet = curBet();
     const wager = bet * CONFIG.LOSS_CAP_MULT;
     $('bs-amount').textContent = bet;
     $('bs-req-num').textContent = wager;
-    // left panel: tier-perk summary (一般局 name / 亮X張[＋過水加倍][＋限N手])
-    if (!ch.skill.reveal) {
-      $('bs-reveal').textContent = ch.tierName;
-    } else {
-      let s = TEXT.revealPrefix + ch.reveals[S.betIdx] + TEXT.revealUnit;
-      if (ch.skill.pass) s += TEXT.perkPass;
-      if (ch.skill.handLimit) s += TEXT.perkHandLimit + ch.skill.handLimit + TEXT.perkHandLimitUnit;
-      $('bs-reveal').textContent = s;
-    }
+    // difficulty tabs — highlight the active one
+    DIFF_ORDER.forEach(k => $('diff-' + k).classList.toggle('active', k === S.diffKey));
+    // skill summary: base (海底＋對花) + difficulty perks (reveal by stake / pass / hand limit)
+    let s = TEXT.skillBase;
+    if (diff.skill.reveal) s += '｜' + TEXT.revealPrefix + revealForBet(bet) + TEXT.revealUnit;
+    if (diff.skill.pass) s += TEXT.perkPass;
+    if (diff.skill.handLimit) s += TEXT.perkHandLimit + diff.skill.handLimit + TEXT.perkHandLimitUnit;
+    $('bs-reveal').textContent = s;
     $('bs-credits').textContent = S.credits;
     const short = S.credits < wager;
     const btn = $('bs-start');
     btn.disabled = short;
     btn.textContent = short ? TEXT.betShort : TEXT.betStart;
-    $('bs-minus').disabled = S.betIdx === 0;
-    $('bs-plus').disabled = S.betIdx === ch.bets.length - 1;
+    $('bs-minus').disabled = S.betIdx <= floor;      // can't go below the difficulty floor
+    $('bs-plus').disabled = S.betIdx === BET_LADDER.length - 1;
+    // character = pure skin
+    const ch = curChar();
     const csImg = $('cs-img');
     if (csImg.getAttribute('src') !== ch.img) csImg.src = ch.img;
     $('cs-name').textContent = ch.name;
-    $('cs-desc').textContent = `${ch.tierName}｜${TEXT.betRange}${ch.bets[0]}~${ch.bets[ch.bets.length - 1]}`;
+    $('cs-desc').textContent = `${diff.name}｜${TEXT.minBetPrefix}${diff.minBet}`;
   }
 
   function drive() {
@@ -1461,10 +1475,12 @@ if (typeof document !== 'undefined') {
     $('debug-toggle').onclick = () => {
       const b = $('debug-body'); b.style.display = b.style.display === 'none' ? 'block' : 'none';
     };
-    $('bs-minus').onclick = () => { if (S.betIdx > 0) { S.betIdx--; renderBetSel(); } };
-    $('bs-plus').onclick = () => { if (S.betIdx < curChar().bets.length - 1) { S.betIdx++; renderBetSel(); } };
-    $('cs-prev').onclick = () => { S.charIdx = (S.charIdx + CHARS.length - 1) % CHARS.length; S.betIdx = 0; renderBetSel(); };
-    $('cs-next').onclick = () => { S.charIdx = (S.charIdx + 1) % CHARS.length; S.betIdx = 0; renderBetSel(); };
+    $('bs-minus').onclick = () => { if (S.betIdx > minBetIdx()) { S.betIdx--; renderBetSel(); } };
+    $('bs-plus').onclick = () => { if (S.betIdx < BET_LADDER.length - 1) { S.betIdx++; renderBetSel(); } };
+    // character = pure skin: cycling it never changes stake or difficulty
+    $('cs-prev').onclick = () => { S.charIdx = (S.charIdx + CHARS.length - 1) % CHARS.length; renderBetSel(); };
+    $('cs-next').onclick = () => { S.charIdx = (S.charIdx + 1) % CHARS.length; renderBetSel(); };
+    DIFF_ORDER.forEach(k => { $('diff-' + k).onclick = () => { S.diffKey = k; renderBetSel(); }; });
     $('bs-start').onclick = () => {
       if (S.credits < curBet() * CONFIG.LOSS_CAP_MULT) return;
       $('betsel').style.display = 'none';

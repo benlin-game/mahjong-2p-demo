@@ -106,33 +106,34 @@ const FAN = {
 // Duihua bonus: P(0/1/2/3 matches) — cumulative thresholds
 const DUIHUA_PROBS = [0.5, 0.85, 0.95, 1.0];
 
-// Difficulty tiers — two characters share each tier's skill set.
-// skill flags: pass = pass-doubling, reveal = bet-tier hand reveal, handLimit = max draws
-// per seat (0 = unlimited). Haidi + base duihua are always on. minBet gates the tier.
-// Difficulty tiers — each has its own stake table + per-stake reveal count.
-// bets = selectable base stakes (per-game wager / loss cap = bet × LOSS_CAP_MULT).
-// reveals = AI tiles shown to the player at the matching stake index (0 = none).
-const TIERS = {
-  normal: { name: '一般局', bets: [100, 300, 500, 1000, 2000],       reveals: [0, 0, 0, 0, 0],
-            skill: { pass: false } },
-  expert: { name: '高手局', bets: [500, 1000, 2000, 5000, 10000],    reveals: [1, 3, 5, 7, 9],
-            skill: { pass: false, reveal: true } },
-  elite:  { name: '菁英局', bets: [2000, 5000, 10000, 50000, 100000], reveals: [1, 3, 5, 7, 9],
-            skill: { pass: true, reveal: true, handLimit: 10 } },
+// Three decoupled axes: character (skin only), difficulty (skill set + min stake),
+// and stake (global ladder, gated by the difficulty's minBet).
+//
+// Global base-stake ladder. Per-game wager / loss cap = bet × LOSS_CAP_MULT.
+const BET_LADDER = [100, 300, 500, 1000, 2000, 5000, 10000, 50000, 100000];
+
+// Difficulty = skill set + minimum stake. Characters no longer own these.
+// skill flags: pass = pass-doubling, reveal = stake-based hand reveal,
+// handLimit = max draws per seat (0 = unlimited). Haidi + base duihua always on.
+// reveal count itself comes from revealForBet(bet) in game.js (absolute stake → tiles),
+// so it stays independent of both character and difficulty tier index.
+const DIFF_ORDER = ['normal', 'expert', 'elite'];
+const DIFFS = {
+  normal: { name: '一般局', minBet: 100,  skill: { pass: false, reveal: false, handLimit: 0 } },
+  expert: { name: '高手局', minBet: 500,  skill: { pass: false, reveal: true,  handLimit: 0 } },
+  elite:  { name: '菁英局', minBet: 2000, skill: { pass: true,  reveal: true,  handLimit: 10 } },
 };
 
-// Opponent characters (portraits in assets/chars/; names are placeholders — rename freely).
+// Opponent characters — pure skins. All 6 selectable in any difficulty / stake.
+// (portraits in assets/chars/; names are placeholders — rename freely).
 const CHARS = [
-  { id: 'B1', name: '老雀聖',   img: 'assets/chars/C_B1.png', tier: 'normal' },
-  { id: 'G2', name: '魅影佳人', img: 'assets/chars/C_G2.png', tier: 'normal' },
-  { id: 'B3', name: '冷面浪子', img: 'assets/chars/C_B3.png', tier: 'expert' },
-  { id: 'B4', name: '暗夜之手', img: 'assets/chars/C_B4.png', tier: 'expert' },
-  { id: 'G1', name: '翡翠夫人', img: 'assets/chars/C_G1.png', tier: 'elite' },
-  { id: 'B2', name: '金龍賭王', img: 'assets/chars/C_B2.png', tier: 'elite' },
-].map(c => {
-  const t = TIERS[c.tier];
-  return { ...c, tierName: t.name, bets: t.bets, reveals: t.reveals, skill: t.skill };
-});
+  { id: 'B1', name: '老雀聖',   img: 'assets/chars/C_B1.png' },
+  { id: 'G2', name: '魅影佳人', img: 'assets/chars/C_G2.png' },
+  { id: 'B3', name: '冷面浪子', img: 'assets/chars/C_B3.png' },
+  { id: 'B4', name: '暗夜之手', img: 'assets/chars/C_B4.png' },
+  { id: 'G1', name: '翡翠夫人', img: 'assets/chars/C_G1.png' },
+  { id: 'B2', name: '金龍賭王', img: 'assets/chars/C_B2.png' },
+];
 
 const TEXT = {
   title: '二人麻將機台',
@@ -173,11 +174,14 @@ const TEXT = {
   revealUnit: ' 張',
   revealNone: '對手不亮牌',
   chooseOpp: '選擇對手',
+  chooseDiff: '選擇難度',
   betRange: '底注 ',
   perkPass: '＋過水加倍',
   perkHandLimit: '＋限 ', perkHandLimitUnit: ' 手',
+  skillBase: '海底＋對花',
+  minBetPrefix: '底注需 ≥ ',
 };
 
 if (typeof module !== 'undefined') {
-  module.exports = { CONFIG, KINDS, SUITS, SUIT_NAME, NUM_NAME, HONOR_NAME, FAN, TEXT, DUIHUA_PROBS, CHARS };
+  module.exports = { CONFIG, KINDS, SUITS, SUIT_NAME, NUM_NAME, HONOR_NAME, FAN, TEXT, DUIHUA_PROBS, CHARS, BET_LADDER, DIFFS, DIFF_ORDER };
 }
