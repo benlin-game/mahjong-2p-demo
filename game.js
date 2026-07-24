@@ -983,7 +983,7 @@ if (typeof document !== 'undefined') {
     machine: createMachine(Date.now() & 0x7fffffff),
     round: 0, g: null, auto: false, speed: 500,
     tingMode: false, tingSelect: null, timer: null,
-    betIdx: 0, charIdx: 0, diffKey: 'normal', autoNext: false,
+    betIdx: 0, charIdx: 0, diffKey: 'normal', autoNext: false, vsTimer: null,
   };
   function curChar() { return CHARS[S.charIdx]; }        // pure skin
   function curDiff() { return DIFFS[S.diffKey]; }        // skill set + min stake
@@ -1036,6 +1036,21 @@ if (typeof document !== 'undefined') {
     $('opp-name').textContent = ch.name;
   }
 
+  // opening VS splash — plays only on manual 開局 (random opponent skin).
+  // auto-next keeps the same opponent and skips this entirely.
+  function playVsThenStart() {
+    S.charIdx = Math.floor(Math.random() * CHARS.length); // random skin, independent of game RNG
+    const ch = curChar();
+    const img = $('vs-img');
+    if (img.getAttribute('src') !== ch.img) img.src = ch.img;
+    $('vs-name').textContent = ch.name;
+    const ov = $('vs-anim');
+    ov.style.display = 'flex';
+    ov.classList.remove('run'); void ov.offsetWidth; ov.classList.add('run'); // restart CSS anim
+    clearTimeout(S.vsTimer);
+    S.vsTimer = setTimeout(() => { ov.style.display = 'none'; newRound(); }, 1600);
+  }
+
   // --- bet selection screen (entry + after every settlement) ---
   function showBetSel() {
     hideOverlay();
@@ -1065,12 +1080,7 @@ if (typeof document !== 'undefined') {
     btn.textContent = short ? TEXT.betShort : TEXT.betStart;
     $('bs-minus').disabled = S.betIdx <= floor;      // can't go below the difficulty floor
     $('bs-plus').disabled = S.betIdx === BET_LADDER.length - 1;
-    // character = pure skin
-    const ch = curChar();
-    const csImg = $('cs-img');
-    if (csImg.getAttribute('src') !== ch.img) csImg.src = ch.img;
-    $('cs-name').textContent = ch.name;
-    $('cs-desc').textContent = `${diff.name}｜${TEXT.minBetPrefix}${diff.minBet}`;
+    $('bs-diffinfo').textContent = `${diff.name}｜${TEXT.minBetPrefix}${diff.minBet}`;
   }
 
   function drive() {
@@ -1477,14 +1487,11 @@ if (typeof document !== 'undefined') {
     };
     $('bs-minus').onclick = () => { if (S.betIdx > minBetIdx()) { S.betIdx--; renderBetSel(); } };
     $('bs-plus').onclick = () => { if (S.betIdx < BET_LADDER.length - 1) { S.betIdx++; renderBetSel(); } };
-    // character = pure skin: cycling it never changes stake or difficulty
-    $('cs-prev').onclick = () => { S.charIdx = (S.charIdx + CHARS.length - 1) % CHARS.length; renderBetSel(); };
-    $('cs-next').onclick = () => { S.charIdx = (S.charIdx + 1) % CHARS.length; renderBetSel(); };
     DIFF_ORDER.forEach(k => { $('diff-' + k).onclick = () => { S.diffKey = k; renderBetSel(); }; });
     $('bs-start').onclick = () => {
       if (S.credits < curBet() * CONFIG.LOSS_CAP_MULT) return;
       $('betsel').style.display = 'none';
-      newRound();
+      playVsThenStart();   // roll a random opponent + VS splash, then newRound
     };
     showBetSel();
   }

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>二人麻將機台</title>
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <div id="topbar">
@@ -61,17 +61,8 @@
           <div class="bs-line big">下方選擇投注金額</div>
           <div class="bs-line">持有金幣需 ≥ <span id="bs-req-num" class="bs-req">1600</span></div>
           <div class="bs-line" id="bs-reveal"></div>
+          <div class="bs-line small" id="bs-diffinfo"></div>
           <div class="bs-line small">持分 <span id="bs-credits"></span></div>
-        </div>
-        <div id="char-sel">
-          <div class="cs-title">選擇對手</div>
-          <div class="cs-row">
-            <button id="cs-prev">◀</button>
-            <img id="cs-img" alt="">
-            <button id="cs-next">▶</button>
-          </div>
-          <div id="cs-name"></div>
-          <div id="cs-desc"></div>
         </div>
       </div>
       <div class="bs-bottom">
@@ -83,6 +74,15 @@
         <button id="bs-start">開局</button>
         <label id="bs-autonext-label"><input type="checkbox" id="bs-autonext">自動<br>下一局</label>
       </div>
+    </div>
+  </div>
+
+  <div id="vs-anim">
+    <div id="vs-inner">
+      <div id="vs-tag">本局對手</div>
+      <div id="vs-word">VS</div>
+      <img id="vs-img" alt="">
+      <div id="vs-name"></div>
     </div>
   </div>
 
@@ -118,7 +118,7 @@
     <div id="debug-body"></div>
   </div>
 
-  <script src="data.js?v=2"></script>
-  <script src="game.js?v=2"></script>
+  <script src="data.js?v=4"></script>
+  <script src="game.js?v=4"></script>
 </body>
 </html>
