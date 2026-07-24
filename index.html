@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>二人麻將機台</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="topbar">
+    <span class="brand">二人麻將機台</span>
+    <span class="info">第 <b id="round-num">-</b> 局</span>
+    <span class="info">本局花色：<b id="suit-name">-</b></span>
+    <span class="info" id="wager-info"></span>
+    <span class="badge mult" id="mult-badge" style="display:none">×1</span>
+    <span class="spacer"></span>
+    <span class="info">持分 <b id="credits">-</b></span>
+    <label id="autoplay-label"><input type="checkbox" id="auto-toggle">自動玩</label>
+  </div>
+
+  <div id="table">
+    <div class="zone" id="ai-zone">
+      <div class="row">
+        <span class="zone-label">莊家</span>
+        <span class="badge dealer" id="dealer-ai" style="display:none">莊</span>
+        <span class="badge ting" id="ting-ai" style="display:none">聽</span>
+        <div id="ai-hand"></div>
+        <div class="melds" id="ai-melds"></div>
+      </div>
+    </div>
+
+    <div id="center">
+      <div class="river" id="ai-river"></div>
+      <div class="wall-info">牆<br><b id="wall-count">-</b></div>
+      <div class="river" id="p-river"></div>
+    </div>
+
+    <div class="zone" id="p-zone">
+      <div class="row" id="p-info">
+        <span class="zone-label">你</span>
+        <span class="badge dealer" id="dealer-you" style="display:none">莊</span>
+        <span class="badge ting" id="ting-you" style="display:none">聽</span>
+        <div id="ting-live"></div>
+        <div id="actions"></div>
+      </div>
+      <div class="row" id="p-panel"><div class="melds" id="p-melds"></div><div id="p-hand"></div></div>
+    </div>
+  </div>
+
+  <div id="betsel">
+    <div id="betsel-card">
+      <div class="bs-title">二人麻將</div>
+      <div class="bs-mid">
+        <div class="bs-panel">
+          <div class="bs-line">贏分無上限，最多輸 16 倍</div>
+          <div class="bs-line big">下方選擇投注金額</div>
+          <div class="bs-line">持有金幣需 ≥ <span id="bs-req-num" class="bs-req">1600</span></div>
+          <div class="bs-line" id="bs-reveal"></div>
+          <div class="bs-line small">持分 <span id="bs-credits"></span></div>
+        </div>
+        <div id="char-sel">
+          <div class="cs-title">選擇對手</div>
+          <div class="cs-row">
+            <button id="cs-prev">◀</button>
+            <img id="cs-img" alt="">
+            <button id="cs-next">▶</button>
+          </div>
+          <div id="cs-name"></div>
+          <div id="cs-desc"></div>
+        </div>
+      </div>
+      <div class="bs-bottom">
+        <div class="bs-stepper">
+          <button id="bs-minus">−</button>
+          <div class="bs-amount-box"><b id="bs-amount">100</b><span>總投注額</span></div>
+          <button id="bs-plus">＋</button>
+        </div>
+        <button id="bs-start">開局</button>
+        <label id="bs-autonext-label"><input type="checkbox" id="bs-autonext">自動<br>下一局</label>
+      </div>
+    </div>
+  </div>
+
+  <div id="bonus">
+    <div id="bonus-card">
+      <div id="bonus-title"></div>
+      <div id="bonus-note"></div>
+      <div id="bonus-pool"></div>
+      <button id="bonus-confirm">開牌結算</button>
+    </div>
+  </div>
+
+  <div id="overlay">
+    <div id="ov-card">
+      <div id="ov-title"></div>
+      <div id="ov-hand"></div>
+      <div id="ov-fans"></div>
+      <div id="ov-net"></div>
+      <div id="ov-cap"></div>
+      <button id="next-btn">下一局</button>
+    </div>
+  </div>
+
+  <div id="opp-char">
+    <img id="opp-img" alt="">
+    <div id="opp-name"></div>
+  </div>
+
+  <label id="autonext-label"><input type="checkbox" id="autonext-toggle">自動下一局（同對手同注額）</label>
+
+  <div id="debug">
+    <button id="debug-toggle">⚙</button>
+    <div id="debug-body"></div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
