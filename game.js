@@ -1051,9 +1051,29 @@ if (typeof document !== 'undefined') {
     S.vsTimer = setTimeout(() => { ov.style.display = 'none'; newRound(); }, 1600);
   }
 
+  // wipe the table back to a fresh "just sat down" state (no tiles from the finished round)
+  function clearTable() {
+    S.g = null;
+    clearTimeout(S.timer);
+    for (const id of ['ai-hand', 'ai-melds', 'ai-river', 'p-hand', 'p-melds', 'p-river', 'ting-live', 'actions']) {
+      $(id).innerHTML = '';
+    }
+    for (const id of ['dealer-you', 'dealer-ai', 'mult-badge', 'ting-you', 'ting-ai']) {
+      $(id).style.display = 'none';
+    }
+    $('opp-char').style.display = 'none';
+    $('bonus').style.display = 'none';
+    $('round-num').textContent = '-';
+    $('suit-name').textContent = '-';
+    $('wall-count').textContent = '-';
+    $('wager-info').textContent = '';
+    $('credits').textContent = S.credits;
+  }
+
   // --- bet selection screen (entry + after every settlement) ---
   function showBetSel() {
     hideOverlay();
+    clearTable();
     $('betsel').style.display = 'flex';
     renderBetSel();
   }
@@ -1103,8 +1123,9 @@ if (typeof document !== 'undefined') {
     S.credits += g.result.net;
     render();
     showOverlay(g.result);
-    // auto (AI plays) and autoNext (player plays, skip bet screen) both continue automatically
-    if (S.auto || S.autoNext) S.timer = setTimeout(advanceAfterSettle, 1500);
+    // only full auto-play (AI plays everything) auto-advances at settlement.
+    // 自動下一局 (autoNext) still waits for a manual 下一局 click — it only skips the bet screen afterwards.
+    if (S.auto) S.timer = setTimeout(advanceAfterSettle, 1500);
   }
 
   // called from the settlement overlay's next button, or auto-fired after a delay:
@@ -1134,7 +1155,11 @@ if (typeof document !== 'undefined') {
     if (!g) return;
     $('round-num').textContent = S.round;
     $('suit-name').textContent = SUIT_NAME[g.suit];
-    $('wall-count').textContent = g.wall.length;
+    // elite hand-limit rounds end at handLimit draws/seat (not wall exhaustion),
+    // so show the shared remaining-draw budget (handLimit×2 − draws used) instead of raw wall size
+    $('wall-count').textContent = g.sk.handLimit
+      ? Math.max(0, g.sk.handLimit * 2 - (g.drawNum[0] + g.drawNum[1]))
+      : g.wall.length;
     $('credits').textContent = S.credits;
     $('wager-info').textContent = `${TEXT.wager} ${g.base * CONFIG.LOSS_CAP_MULT}（底注 ${g.base}）`;
     $('dealer-you').style.display = g.dealer === 0 ? 'inline-flex' : 'none';

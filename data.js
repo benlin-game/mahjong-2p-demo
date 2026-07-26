@@ -144,7 +144,7 @@ const TEXT = {
   pass: '過水', pon: '碰', chi: '吃', gang: '槓', ting: '喊聽', skip: '略過',
   huButton: '胡！',
   passHint: '過水加倍 ×',
-  wall: '牆', round: '局', mult: '倍',
+  wall: '手', round: '局', mult: '倍',
   credits: '持分', wager: '每局注額',
   next: '下一局',
   autoplay: '自動玩',
