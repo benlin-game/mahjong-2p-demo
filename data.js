@@ -136,7 +136,7 @@ const CHARS = [
 ];
 
 const TEXT = {
-  title: '二人麻將機台',
+  title: '雀聖對決',
   you: '你', ai: '莊家',
   dealerMark: '莊',
   draw: '流局',
@@ -163,7 +163,7 @@ const TEXT = {
   bonusLeft: '還可摸',
   bonusUnit: '張',
   bonusConfirm: '開牌結算',
-  betTitle: '二人麻將',
+  betTitle: '雀聖對決',
   betRule: '贏分無上限，最多輸 16 倍',
   betChoose: '下方選擇投注金額',
   betReqPrefix: '持有金幣需 ≥ ',
