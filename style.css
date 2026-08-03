@@ -44,7 +44,41 @@ body {
 }
 .badge.dealer { background: var(--gold); color: #5a3d00; }
 .badge.mult { background: var(--red); color: #fff; font-size: 14px; }
+
+/* pass-doubling readout: label + big multiplier + times passed.
+   Lives in #p-info (bottom-left, player's own status row) rather than the top bar — it is the
+   player's own stake, and it belongs where their eyes already are during a decision.
+   Always visible on tables that allow 過水 (even at ×1) so the player can see it climb. */
+.stat.mult {
+  display: inline-flex; flex-direction: column; align-items: center; line-height: 1.15;
+  padding: 3px 14px; border-radius: 9px; white-space: nowrap; flex: none;
+  background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.16);
+}
+.stat.mult .stat-label { font-size: 11px; opacity: .65; letter-spacing: 1px; }
+.stat.mult .stat-value { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.stat.mult .stat-value b { font-size: 22px; font-weight: bold; color: #fff; }
+.stat.mult .stat-value i { font-size: 12px; font-style: normal; opacity: .7; }
+/* live (>x1): red hot state */
+.stat.mult.live {
+  background: var(--red); border-color: rgba(255,255,255,.45);
+  box-shadow: 0 0 10px rgba(214,58,58,.55);
+}
+.stat.mult.live .stat-label,
+.stat.mult.live .stat-value i { opacity: .85; }
+/* fires once each time the multiplier actually climbs */
+.stat.mult.bump { animation: multBump .55s ease-out; }
+@keyframes multBump {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(1.35); box-shadow: 0 0 22px rgba(255,214,102,.95); }
+  100% { transform: scale(1); }
+}
+/* cap reached: gold, and the label says so instead of counting down */
+.stat.mult.capped { background: var(--gold); border-color: #fff5cc; }
+.stat.mult.capped .stat-value b,
+.stat.mult.capped .stat-label,
+.stat.mult.capped .stat-value i { color: #5a3d00; opacity: .9; }
 .badge.ting { background: var(--blue); color: #fff; }
+.badge.fold { background: var(--green); color: #fff; }
 #autoplay-label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
 
 /* ---- table zones ---- */
@@ -205,8 +239,46 @@ body {
   background: rgba(0,0,0,.7); z-index: 11;
 }
 #betsel-card {
+  position: relative; z-index: 1;
   display: flex; flex-direction: column; gap: 18px; align-items: center;
   min-width: 400px;
+}
+
+/* ---- opponent roster on the bet screen ----
+   All six sit around the card from the first launch, but a portrait only resolves once the
+   player has beaten that opponent. Until then it is a black silhouette with a ?, so the
+   line-up itself reads as a collection with holes in it. Purely cosmetic: pointer-events are
+   off so a portrait can never eat a click on the card, and it sits behind the card (z-index). */
+#bs-roster { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.bs-char { position: absolute; line-height: 0; }
+.bs-char img {
+  height: 100%; width: auto;
+  filter: drop-shadow(0 8px 22px rgba(0,0,0,.65));
+  transition: filter .35s ease, opacity .35s ease;
+}
+/* brightness(0) keeps the cut-out alpha and flattens every visible pixel to black,
+   so one asset serves both states — no separate silhouette art needed */
+.bs-char.locked img {
+  filter: brightness(0) drop-shadow(0 0 3px rgba(255,255,255,.32)) drop-shadow(0 8px 22px rgba(0,0,0,.6));
+  opacity: .92;
+}
+.bs-char .bs-q {
+  position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%);
+  display: none; font-size: 46px; font-weight: 900; color: #fff;
+  text-shadow: 0 0 14px rgba(0,0,0,.9), 0 2px 4px rgba(0,0,0,.8);
+}
+.bs-char.locked .bs-q { display: block; }
+/* six slots, mirrored around the card; heights in vh so they scale with the window */
+.bs-char.p0 { left: 15%;  top: 5%;     height: 40vh; }
+.bs-char.p1 { left: 2%;   top: 30%;    height: 36vh; }
+.bs-char.p2 { left: 13%;  bottom: 0;   height: 44vh; }
+.bs-char.p3 { right: 16%; top: 2%;     height: 40vh; }
+.bs-char.p4 { right: 2%;  top: 26%;    height: 40vh; }
+.bs-char.p5 { right: 14%; bottom: 0;   height: 42vh; }
+/* narrow windows: the card wins, drop the inner four so nothing crowds it */
+@media (max-width: 1100px) {
+  .bs-char.p0, .bs-char.p2, .bs-char.p3, .bs-char.p5 { display: none; }
+  .bs-char.p1, .bs-char.p4 { height: 30vh; opacity: .8; }
 }
 .bs-logo { width: 440px; max-width: 86vw; line-height: 0; }
 .bs-logo img { width: 100%; height: auto; filter: drop-shadow(0 6px 18px rgba(0,0,0,.55)); }
@@ -284,6 +356,12 @@ body {
 .tile.bonus-hit { outline: 3px solid var(--gold); box-shadow: 0 0 14px var(--gold); }
 .tile.bonus-miss { /* picked but no match: plain face, no dimming */ }
 .tile.bonus-rest { opacity: .7; }
+/* round dora: gold-tinted face wherever a copy sits (hand, melds, both seats) — declared
+   BEFORE match-glow so a duihua hit's outline still wins the box-shadow slot */
+.tile.dora {
+  background: linear-gradient(180deg, #fff7dc 0%, #f2ddA0 100%);
+  box-shadow: 0 2px 4px rgba(0,0,0,.4), inset 0 0 0 2px rgba(206,157,44,.9);
+}
 .tile.match-glow { outline: 2px solid var(--gold); box-shadow: 0 0 12px var(--gold); }
 /* keep the player's hand visible (not darkened) while a bonus game is open */
 body.bonus-open #p-hand { position: relative; z-index: 10; }
@@ -342,6 +420,85 @@ body.bonus-open #p-hand { position: relative; z-index: 10; }
 @keyframes vsImgIn { 0% { opacity: 0; transform: scale(.6) translateY(24px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
 @keyframes vsWordIn { 0% { opacity: 0; transform: scale(2.2); } 60% { opacity: 1; transform: scale(.92); } 100% { transform: scale(1); } }
 @keyframes vsFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---- round-suit splash + persistent stamp ----
+   The round's suit is the single most load-bearing fact on this table (every hand is a
+   one-suit hand, so it decides what the whole round looks like). It used to be plain text in
+   the top bar; now it gets announced on entry and then stays stamped where the player can
+   glance at it. Suit is chosen inside newGame(), so the splash can only play after the game
+   object exists — newRound() defers drive() until it finishes. */
+/* Renders the round dora as a tile face: number over suit, same reading order as tileEl,
+   so the splash / stamp / hand tile are recognisably the same object. */
+.suit-tile {
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #fffdf6 0%, #f1ead6 100%);
+  color: #1c6b45; font-weight: bold; line-height: 1;
+  width: 26px; height: 34px; border-radius: 5px; font-size: 17px;
+  box-shadow: 0 2px 4px rgba(0,0,0,.4), inset 0 -1px 0 rgba(0,0,0,.08);
+}
+.suit-tile .n { font-size: 1em; }
+.suit-tile .s { font-size: .5em; opacity: .75; margin-top: .1em; }
+.stat.suit {
+  display: inline-flex; align-items: center; gap: 8px; flex: none; white-space: nowrap;
+  padding: 3px 12px 3px 10px; border-radius: 9px;
+  background: rgba(0,0,0,.4); border: 1px solid rgba(240,199,94,.45);
+}
+.stat.suit .stat-label { font-size: 11px; opacity: .7; letter-spacing: 1px; }
+/* stamped in as the splash hands off, so the eye follows it from centre to top bar */
+.stat.suit.stamp .suit-tile { animation: suitStampSmall .45s cubic-bezier(.2,.9,.3,1.5) both; }
+@keyframes suitStampSmall {
+  0%   { transform: scale(2.1); opacity: 0; }
+  55%  { transform: scale(.92); opacity: 1; box-shadow: 0 0 18px rgba(240,199,94,.95); }
+  100% { transform: scale(1); }
+}
+
+#suit-anim {
+  position: fixed; inset: 0; display: none; z-index: 21; cursor: pointer;
+  align-items: center; justify-content: center;
+  background: radial-gradient(circle at center, rgba(8,58,44,.94), rgba(0,0,0,.96));
+}
+#suit-inner { display: flex; flex-direction: column; align-items: center; gap: 26px; }
+#suit-title {
+  font-size: 54px; font-weight: 900; letter-spacing: 10px; color: var(--gold);
+  -webkit-text-stroke: 2px rgba(60,30,0,.85);
+  text-shadow: 0 0 26px rgba(240,199,94,.75), 0 6px 0 rgba(0,0,0,.35);
+}
+#suit-stage { position: relative; display: flex; align-items: center; justify-content: center; }
+.suit-tile.big {
+  width: 132px; height: 178px; border-radius: 16px; font-size: 92px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.6), inset 0 -4px 0 rgba(0,0,0,.1),
+              0 0 42px rgba(240,199,94,.55);
+}
+/* expanding ring = the "press" of the stamp landing */
+#suit-ring {
+  position: absolute; width: 132px; height: 178px; border-radius: 16px;
+  border: 3px solid rgba(240,199,94,.9); opacity: 0; pointer-events: none;
+}
+#suit-note {
+  font-size: 20px; letter-spacing: 4px; color: #f7e6b8;
+  text-shadow: 0 2px 8px rgba(0,0,0,.65);
+}
+#suit-anim.run #suit-note { animation: suitNoteIn .45s ease .52s both; }
+@keyframes suitNoteIn {
+  0%   { opacity: 0; transform: translateY(12px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+#suit-anim.run #suit-title { animation: suitTitleIn .5s ease both; }
+#suit-anim.run .suit-tile.big { animation: suitStampIn .6s cubic-bezier(.2,.9,.3,1.5) .18s both; }
+#suit-anim.run #suit-ring { animation: suitRing .7s ease-out .34s both; }
+@keyframes suitTitleIn {
+  0%   { opacity: 0; transform: translateY(-22px); letter-spacing: 26px; }
+  100% { opacity: 1; transform: translateY(0); letter-spacing: 10px; }
+}
+@keyframes suitStampIn {
+  0%   { opacity: 0; transform: scale(2.6) rotate(-8deg); }
+  60%  { opacity: 1; transform: scale(.9) rotate(2deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+@keyframes suitRing {
+  0%   { opacity: .95; transform: scale(1); }
+  100% { opacity: 0; transform: scale(2.5); }
+}
 
 /* ---- auto-next-round toggle (bottom-right, persistent during play) ---- */
 #autonext-label {

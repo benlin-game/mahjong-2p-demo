@@ -8,6 +8,7 @@ const CONFIG = {
   START_CREDITS: 5000000,  // demo starting credits
   RTP_TARGET: 0.95,        // display fallback for the stats readout before any games
   RTP_WINDOW: 400,         // rolling window size (games) for the RTP readout
+  SUIT_SPLASH_MS: 1600,    // round-dora splash duration (tap to skip)
   ACTION_CAP: 400,         // hard safety cap on actions per game (selfTest)
 };
 
@@ -101,6 +102,11 @@ const FAN = {
   queshen:       { name: '雀神無雙', fan: 168 },
   // bonus mini-game (not in the rulebook fan table; player-only duihua bonus)
   duihua:        { name: '對花', fan: 1 },
+  // round dora (not in the rulebook fan table). One number tile of the round suit is
+  // announced at deal time; BOTH seats score every copy they hold (hand + melds), and a
+  // duihua hit on it pays duihuaDora instead of the flat duihua rate.
+  dora:          { name: '本場寶牌', fan: 1 },
+  duihuaDora:    { name: '對花寶牌', fan: 3 },
 };
 
 // Duihua bonus: P(0/1/2/3 matches) — cumulative thresholds
@@ -114,14 +120,18 @@ const BET_LADDER = [100, 300, 500, 1000, 2000, 5000, 10000, 50000, 100000];
 
 // Difficulty = skill set + minimum stake. Characters no longer own these.
 // skill flags: pass = pass-doubling, reveal = stake-based hand reveal,
-// handLimit = max draws per seat (0 = unlimited). Haidi + base duihua always on.
+// handLimit = max draws per seat (0 = unlimited). Haidi + base duihua are universal, so they
+// are not part of any tier's identity and are not listed on the bet screen.
+// One perk per tier, deliberately NOT cumulative: normal = hand limit, expert = reveal,
+// elite = pass-doubling. Each table gives up what the others have, so picking a tier is
+// picking a style rather than buying a bigger version of the same thing.
 // reveal count itself comes from revealForBet(bet) in game.js (absolute stake → tiles),
 // so it stays independent of both character and difficulty tier index.
 const DIFF_ORDER = ['normal', 'expert', 'elite'];
 const DIFFS = {
-  normal: { name: '一般局', minBet: 100,  skill: { pass: false, reveal: false, handLimit: 0 } },
+  normal: { name: '一般局', minBet: 100,  skill: { pass: false, reveal: false, handLimit: 10 } },
   expert: { name: '高手局', minBet: 500,  skill: { pass: false, reveal: true,  handLimit: 0 } },
-  elite:  { name: '菁英局', minBet: 2000, skill: { pass: true,  reveal: true,  handLimit: 10 } },
+  elite:  { name: '菁英局', minBet: 2000, skill: { pass: true,  reveal: false, handLimit: 0 } },
 };
 
 // Opponent characters — pure skins. All 6 selectable in any difficulty / stake.
@@ -144,6 +154,8 @@ const TEXT = {
   pass: '過水', pon: '碰', chi: '吃', gang: '槓', ting: '喊聽', skip: '略過',
   huButton: '胡！',
   passHint: '過水加倍 ×',
+  passMultLabel: '過水倍數',
+  passTimes: '次', passLeft: '還可過水', passAtCap: '已達上限',
   wall: '手', round: '局', mult: '倍',
   credits: '持分', wager: '每局注額',
   next: '下一局',
@@ -153,6 +165,8 @@ const TEXT = {
   netWin: '贏', netLose: '輸',
   total: '合計',
   suitOfRound: '本局花色',
+  doraLabel: '本場寶牌',
+  doraNote: '持有一張 ＋1 台',
   chooseChi: '選擇吃牌組合',
   tingSelect: '選擇打出的牌（維持聽牌）',
   robbed: '搶槓！',
@@ -176,9 +190,9 @@ const TEXT = {
   chooseOpp: '選擇對手',
   chooseDiff: '選擇難度',
   betRange: '底注 ',
-  perkPass: '＋過水加倍',
-  perkHandLimit: '＋限 ', perkHandLimitUnit: ' 手',
-  skillBase: '海底＋對花',
+  perkPass: '過水加倍',
+  perkHandLimit: '限 ', perkHandLimitUnit: ' 手',
+  perkNone: '－',
   minBetPrefix: '底注需 ≥ ',
 };
 

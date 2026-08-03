@@ -180,6 +180,9 @@ function calcFan(g, seat, winTile, ctx) {
     for (const k of KINDS) {
       if (all[k] === 4 && !melds.some(m => m.t === 'gang' && m.tile === k)) bump(ids, 'siguiyi');
     }
+    // round dora — scored off `all` (hand + melds), so it is decomposition-independent and
+    // also lands on the special hands (七對 etc.), which have no sets to hang a bonus on
+    if (g.dora && all[g.dora]) bump(ids, 'dora', all[g.dora]);
   }
   function bump(ids, id, n) { ids.set(id, (ids.get(id) || 0) + (n || 1)); }
 
@@ -401,23 +404,65 @@ function ukeire(counts, meldCount) {
   return n;
 }
 
-// choose best discard from a 14-3m hand; returns {tile, shanten, tenpaiAfter}
+// ---- AI defense ----
+// Reads public information only: rivers, exposed melds, and the ting declaration.
+// Never the opponent's hand or the wall. Deliberately approximate — a perfect
+// blocker would make the table unwinnable and would read to the player as cheating.
+
+// Tiles the declared-ting opponent provably cannot be waiting on: anything either
+// seat discarded after the declaration went up (they drew it and did not win).
+function safeTiles(g, seat) {
+  const from = g.ting[1 - seat] && g.ting[1 - seat].from;
+  const s = new Set();
+  if (!from) return s;
+  for (const q of [0, 1]) for (let i = from[q]; i < g.rivers[q].length; i++) s.add(g.rivers[q][i]);
+  return s;
+}
+
+// 0 = provably safe, higher = more likely to feed the wait
+function dangerOf(g, tile, safe) {
+  if (safe.has(tile)) return 0;
+  const left = 4 - visibleCopies(g, tile);
+  if (left <= 0) return 0;                            // all four accounted for: cannot be waited on
+  const width = isHonor(tile) ? 2                     // honors: pair/triplet waits only
+    : (tile === 1 || tile === 9) ? 3                  // terminals: one sequence runs through them
+    : (tile === 2 || tile === 8) ? 4
+    : 5;                                              // 3-7: maximum sequence coverage
+  return width * left;
+}
+
+// push/fold: 0 = attack (efficiency only), 1 = balance, 2 = fold
+function defenseMode(g, seat) {
+  if (!g.sk.defend) return 0;
+  if (!g.ting[1 - seat]) return 0;                    // nothing declared: nothing to defend against
+  if (g.ting[seat]) return 0;                         // both declared: it is a race, push
+  return aiBestDiscardShanten(g, seat) <= 1 ? 1 : 2;  // close enough to win = keep pushing
+}
+
+// mode 0 keeps the pure-efficiency ordering; 1 breaks efficiency ties by safety;
+// 2 leads on safety and accepts a slower hand to stay out of the way
+function betterDiscard(g, a, b, mode) {
+  const keys = mode === 2 ? ['dg', 'sh', 'uk'] : mode === 1 ? ['sh', 'dg', 'uk'] : ['sh', 'uk'];
+  for (const key of keys) {
+    const d = key === 'uk' ? b.uk - a.uk : a[key] - b[key];  // uk: higher wins; sh/dg: lower wins
+    if (d !== 0) return d < 0;
+  }
+  return g.rng() < 0.5;
+}
+
+// choose best discard from a 14-3m hand; returns {tile, sh, uk, dg}
 function aiBestDiscard(g, seat) {
-  const hand = g.hands[seat];
+  const mode = defenseMode(g, seat);
+  const safe = mode ? safeTiles(g, seat) : null;
   const m = g.melds[seat].length;
-  const c = countsOf(hand);
+  const c = countsOf(g.hands[seat]);
   let best = null;
   for (const k of KINDS) {
     if (!c[k]) continue;
     c[k]--;
-    const sh = shantenOf(c, m);
-    if (!best || sh < best.sh) {
-      best = { tile: k, sh, uk: ukeire(c, m) };
-    } else if (sh === best.sh) {
-      const uk = ukeire(c, m);
-      if (uk > best.uk || (uk === best.uk && g.rng() < 0.5)) best = { tile: k, sh, uk };
-    }
+    const cand = { tile: k, sh: shantenOf(c, m), uk: ukeire(c, m), dg: mode ? dangerOf(g, k, safe) : 0 };
     c[k]++;
+    if (!best || betterDiscard(g, cand, best, mode)) best = cand;
   }
   return best;
 }
@@ -529,20 +574,28 @@ function aiDecision(g) {
 // ---- 5. Game engine ----
 
 // sk = opponent-character skill flags; defaults preserve the baseline profile
-// (pass-doubling on, no reveal, single duihua, no hand limit) so sims stay comparable
+// (pass-doubling on, no reveal, single duihua, no hand limit) so sims stay comparable.
+// defend is on by default — reacting to a declared ting is baseline behaviour, not a perk;
+// pass defend:false to sim the old pure-efficiency AI as a control group
 function newGame(seed, dealer, base, sk) {
   const rng = mulberry32(seed);
   const suit = SUITS[Math.floor(rng() * 3)];
+  // Round dora: a number tile (1-9) of the round suit, announced at deal time. Drawn from a
+  // SIDE stream, never from rng() — pulling one more value out of rng() would shift the whole
+  // wall and invalidate every existing sim baseline plus the controller's presim alignment.
+  // A side hash is also needed because nextGameSeed() does not guarantee a uniform low bits.
+  const dora = 1 + Math.floor(mulberry32(seed ^ 0x5bf03635)() * 9);
   const tiles = [];
   for (const k of KINDS) for (let i = 0; i < 4; i++) tiles.push(k);
   for (let i = tiles.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [tiles[i], tiles[j]] = [tiles[j], tiles[i]]; }
   const g = {
-    seed, rng, suit, dealer,
+    seed, rng, suit, dealer, dora,
     base: base || CONFIG.BASE,
-    sk: Object.assign({ pass: true, reveal: false, duihua2: false, handLimit: 0, revealN: 0 }, sk || {}),
+    sk: Object.assign({ pass: true, reveal: false, duihua2: false, handLimit: 0, revealN: 0, defend: true }, sk || {}),
     wall: tiles,
     hands: [[], []], melds: [[], []], rivers: [[], []],
     passMult: [1, 1],
+    passCount: [0, 0],      // effective doublings so far (multiplier = 2^passCount, capped)
     ting: [null, null],
     anyCall: false,
     discNum: [0, 0], drawNum: [0, 0],
@@ -610,7 +663,7 @@ function removeTiles(hand, tile, n) {
 
 function applyPass(g, seat) {
   if (!g.sk.pass) return; // this table has no pass-doubling: declining a win is free
-  if (g.passMult[seat] < CONFIG.PASS_MULT_CAP) g.passMult[seat] *= 2;
+  if (g.passMult[seat] < CONFIG.PASS_MULT_CAP) { g.passMult[seat] *= 2; g.passCount[seat]++; }
 }
 
 function doDiscard(g, seat, tile, ting) {
@@ -620,7 +673,8 @@ function doDiscard(g, seat, tile, ting) {
   if (ting && !g.ting[seat]) {
     const first = g.discNum[seat] === 0 && !g.anyCall;
     const kind = first ? (seat === g.dealer ? 'tian' : 'di') : 'normal';
-    g.ting[seat] = { kind };
+    // river marks at declaration time: everything discarded from here on is a proven safe tile
+    g.ting[seat] = { kind, from: [g.rivers[0].length, g.rivers[1].length] };
   }
   g.discNum[seat]++;
   g.lastDiscard = { seat, tile };
@@ -657,7 +711,8 @@ function endDraw(g) {
 }
 function buildHaidiPool(g) {
   const waits = waitsOf(g, 0);
-  // pool holds 1~3 waited tiles; hit/miss is pure luck
+  // pool holds 1~3 waited tiles; hit/miss is pure luck in the prototype
+  // (future blacklist/RTP-bin control plugs in HERE: pool composition + placement)
   const k = 1 + Math.floor(g.rng() * 3);
   const pool = [];
   for (let i = 0; i < k && pool.length < 10; i++) {
@@ -884,10 +939,16 @@ function act(g, dec) {
         return;
       }
       if (dec.t === 'resolve' && p.done) {
-        const M = p.picks.filter(x => x.hit).length;
+        const hits = p.picks.filter(x => x.hit);
+        const nDora = hits.filter(x => x.tile === g.dora).length;   // dora hits pay the higher rate
+        const M = hits.length - nDora;
         if (M > 0) {
           p.fan.items.push({ id: 'duihua', name: FAN.duihua.name, fan: FAN.duihua.fan, n: M });
           p.fan.total += FAN.duihua.fan * M;
+        }
+        if (nDora > 0) {
+          p.fan.items.push({ id: 'duihuaDora', name: FAN.duihuaDora.name, fan: FAN.duihuaDora.fan, n: nDora });
+          p.fan.total += FAN.duihuaDora.fan * nDora;
         }
         settleResult(g, 0, p.winTile, p.tsumo, p.fan);
       }
@@ -983,8 +1044,30 @@ if (typeof document !== 'undefined') {
     machine: createMachine(Date.now() & 0x7fffffff),
     round: 0, g: null, auto: false, speed: 500,
     tingMode: false, tingSelect: null, timer: null,
-    betIdx: 0, charIdx: 0, diffKey: 'normal', autoNext: false, vsTimer: null,
+    betIdx: 0, charIdx: 0, diffKey: 'normal', autoNext: false, vsTimer: null, suitTimer: null,
+    unlocked: null,         // Set of unlocked CHARS ids; filled from storage on boot
+    lastMult: 1,            // last rendered pass multiplier, to fire the bump animation once
   };
+  // ---- opponent roster unlocks ----
+  // A portrait unlocks by BEATING that opponent, not by meeting them — meeting is free (the
+  // opponent is rolled at random), so only a win is worth collecting. Persisted so the
+  // collection survives a reload; file:// can deny storage, hence the try/catch fallback to
+  // in-memory only (unlocks then last for the session).
+  const UNLOCK_KEY = 'qs13.unlocked';
+  function loadUnlocks() {
+    try { return new Set(JSON.parse(localStorage.getItem(UNLOCK_KEY) || '[]')); }
+    catch (e) { return new Set(); }
+  }
+  function saveUnlocks() {
+    try { localStorage.setItem(UNLOCK_KEY, JSON.stringify([...S.unlocked])); } catch (e) { /* no storage: session only */ }
+  }
+  function unlockChar(id) {
+    if (S.unlocked.has(id)) return false;
+    S.unlocked.add(id);
+    saveUnlocks();
+    return true;
+  }
+
   function curChar() { return CHARS[S.charIdx]; }        // pure skin
   function curDiff() { return DIFFS[S.diffKey]; }        // skill set + min stake
   function curBet() { return BET_LADDER[S.betIdx]; }     // global stake ladder
@@ -1013,6 +1096,12 @@ if (typeof document !== 'undefined') {
     return d;
   }
 
+  // Round dora as a tile face (number over suit), matching how tileEl draws a number tile —
+  // the splash and the top-bar stamp must read as the same object the player holds in hand.
+  function doraFace(g) {
+    return `<span class="n">${NUM_NAME[g.dora]}</span><span class="s">${SUIT_NAME[g.suit]}</span>`;
+  }
+
   function newRound() {
     S.round++;
     const dealer = (S.round % 2 === 1) ? 0 : 1;
@@ -1022,9 +1111,38 @@ if (typeof document !== 'undefined') {
     const sk = Object.assign({}, diff.skill, { revealN: diff.skill.reveal ? revealForBet(bet) : 0 });
     S.g = newGame(seed, dealer, bet, sk);
     S.tingMode = false;
+    S.lastMult = 1;          // fresh round starts at x1; don't carry last round's bump state
     showOppChar();
     hideOverlay();
-    drive();
+    playSuitThenDrive();
+  }
+
+  // Announce the round's suit, then start play. Runs on every round-start path (manual 開局
+  // after the VS splash, and auto-next) because the suit is re-rolled every round — unlike the
+  // opponent skin, it is not something the player can carry over in their head.
+  // Skipped entirely in full auto-play, and tappable to skip for players who already saw it.
+  function playSuitThenDrive() {
+    const ov = $('suit-anim');
+    if (S.auto) { ov.style.display = 'none'; drive(); return; }
+    $('suit-big').innerHTML = doraFace(S.g);
+    $('suit-note').textContent = TEXT.doraNote;
+    ov.style.display = 'flex';
+    ov.classList.remove('run'); void ov.offsetWidth; ov.classList.add('run'); // restart CSS anim
+    clearTimeout(S.suitTimer);
+    const finish = () => {
+      clearTimeout(S.suitTimer);
+      ov.style.display = 'none';
+      ov.onclick = null;
+      stampSuit();          // hand the tile off to the top bar so the eye follows it
+      drive();
+    };
+    ov.onclick = finish;
+    S.suitTimer = setTimeout(finish, CONFIG.SUIT_SPLASH_MS);
+  }
+  // replay the small stamp pop on the top-bar readout
+  function stampSuit() {
+    const st = $('suit-stamp');
+    st.classList.remove('stamp'); void st.offsetWidth; st.classList.add('stamp');
   }
 
   function showOppChar() {
@@ -1036,10 +1154,19 @@ if (typeof document !== 'undefined') {
     $('opp-name').textContent = ch.name;
   }
 
-  // opening VS splash — plays only on manual 開局 (random opponent skin).
-  // auto-next keeps the same opponent and skips this entirely.
-  function playVsThenStart() {
+  function rollOpponent() {
     S.charIdx = Math.floor(Math.random() * CHARS.length); // random skin, independent of game RNG
+  }
+
+  // Opponent re-roll + VS splash. Runs on manual 開局 AND on 自動下一局 — auto-next locks the
+  // stake and the difficulty, but the opponent is re-drawn every round, so the splash is how the
+  // player finds out who they got. Full auto-play re-rolls too but silently (see advanceAfterSettle).
+  function playVsThenStart() {
+    // Close the settlement overlay FIRST. The splash covers it visually but does not disable it,
+    // so leaving it up lets a second 下一局 click re-enter this function and reset the timer —
+    // which stalls the hand-off to newRound() indefinitely.
+    hideOverlay();
+    rollOpponent();
     const ch = curChar();
     const img = $('vs-img');
     if (img.getAttribute('src') !== ch.img) img.src = ch.img;
@@ -1051,8 +1178,35 @@ if (typeof document !== 'undefined') {
     S.vsTimer = setTimeout(() => { ov.style.display = 'none'; newRound(); }, 1600);
   }
 
+  // pass-doubling readout. Shown on every table that allows 過水 — including at ×1, so the
+  // player learns the mechanic exists and can watch it climb; hidden entirely where it can't
+  // be used. Also spells out remaining passes, since the multiplier alone doesn't tell the
+  // player how many chances are left (the cap is silent otherwise).
+  const PASS_MAX_COUNT = Math.round(Math.log2(CONFIG.PASS_MULT_CAP));
+  function renderPassMult(g) {
+    const mb = $('mult-badge');
+    if (!g.sk.pass) { mb.style.display = 'none'; S.lastMult = 1; return; }
+    const mult = g.passMult[0], count = g.passCount[0];
+    const atCap = mult >= CONFIG.PASS_MULT_CAP;
+    mb.style.display = 'inline-flex';
+    $('mult-value').textContent = '×' + mult;
+    const used = count ? `${count} ${TEXT.passTimes}・` : '';
+    $('mult-times').textContent = atCap
+      ? `${used}${TEXT.passAtCap}`
+      : `${used}${TEXT.passLeft} ${PASS_MAX_COUNT - count} ${TEXT.passTimes}`;
+    mb.classList.toggle('live', mult > 1);
+    mb.classList.toggle('capped', atCap);
+    if (mult > S.lastMult) {                 // replay the pop each time it actually climbs
+      mb.classList.remove('bump');
+      void mb.offsetWidth;                   // force reflow so the animation restarts
+      mb.classList.add('bump');
+    }
+    S.lastMult = mult;
+  }
+
   // wipe the table back to a fresh "just sat down" state (no tiles from the finished round)
   function clearTable() {
+    S.lastMult = 1;
     S.g = null;
     clearTimeout(S.timer);
     for (const id of ['ai-hand', 'ai-melds', 'ai-river', 'p-hand', 'p-melds', 'p-river', 'ting-live', 'actions']) {
@@ -1064,7 +1218,10 @@ if (typeof document !== 'undefined') {
     $('opp-char').style.display = 'none';
     $('bonus').style.display = 'none';
     $('round-num').textContent = '-';
-    $('suit-name').textContent = '-';
+    $('suit-name').textContent = '-';   // innerHTML face is rebuilt by render() on the next round
+    $('suit-stamp').style.display = 'none';
+    $('suit-anim').style.display = 'none';
+    clearTimeout(S.suitTimer);
     $('wall-count').textContent = '-';
     $('wager-info').textContent = '';
     $('credits').textContent = S.credits;
@@ -1075,7 +1232,25 @@ if (typeof document !== 'undefined') {
     hideOverlay();
     clearTable();
     $('betsel').style.display = 'flex';
+    renderRoster();
     renderBetSel();
+  }
+  function renderRoster() {
+    const wrap = $('bs-roster');
+    wrap.innerHTML = '';
+    CHARS.forEach((ch, i) => {
+      const locked = !S.unlocked.has(ch.id);
+      const slot = document.createElement('div');
+      slot.className = 'bs-char p' + i + (locked ? ' locked' : '');
+      const img = document.createElement('img');
+      img.src = ch.img;
+      img.alt = locked ? '' : ch.name;
+      slot.appendChild(img);
+      const q = document.createElement('span');
+      q.className = 'bs-q'; q.textContent = '?';
+      slot.appendChild(q);
+      wrap.appendChild(slot);
+    });
   }
   function renderBetSel() {
     const diff = curDiff();
@@ -1087,11 +1262,12 @@ if (typeof document !== 'undefined') {
     $('bs-req-num').textContent = wager;
     // difficulty tabs — highlight the active one
     DIFF_ORDER.forEach(k => $('diff-' + k).classList.toggle('active', k === S.diffKey));
-    // skill summary: base (海底＋對花) + difficulty perks (reveal by stake / pass / hand limit)
-    let s = TEXT.skillBase;
-    if (diff.skill.reveal) s += '｜' + TEXT.revealPrefix + revealForBet(bet) + TEXT.revealUnit;
-    if (diff.skill.pass) s += TEXT.perkPass;
-    if (diff.skill.handLimit) s += TEXT.perkHandLimit + diff.skill.handLimit + TEXT.perkHandLimitUnit;
+    // This tier's one perk. 海底 and 對花 are universal, so they are not listed — the line
+    // exists to say what makes THIS table different from the other two.
+    let s = TEXT.perkNone;
+    if (diff.skill.handLimit) s = TEXT.perkHandLimit + diff.skill.handLimit + TEXT.perkHandLimitUnit;
+    else if (diff.skill.reveal) s = TEXT.revealPrefix + revealForBet(bet) + TEXT.revealUnit;
+    else if (diff.skill.pass) s = TEXT.perkPass;
     $('bs-reveal').textContent = s;
     $('bs-credits').textContent = S.credits;
     const short = S.credits < wager;
@@ -1121,6 +1297,8 @@ if (typeof document !== 'undefined') {
     const g = S.g;
     recordResult(S.machine, g);
     S.credits += g.result.net;
+    // beating this opponent reveals their portrait on the bet screen
+    if (g.result.winner === 0) unlockChar(curChar().id);
     render();
     showOverlay(g.result);
     // only full auto-play (AI plays everything) auto-advances at settlement.
@@ -1139,8 +1317,10 @@ if (typeof document !== 'undefined') {
 
   function advanceAfterSettle() {
     clearTimeout(S.timer);
-    if ((S.auto || S.autoNext) && S.credits >= curBet() * CONFIG.LOSS_CAP_MULT) newRound();
-    else showBetSel();
+    if (!(S.auto || S.autoNext) || S.credits < curBet() * CONFIG.LOSS_CAP_MULT) { showBetSel(); return; }
+    // both auto paths keep stake + difficulty and re-draw the opponent; only the reveal differs
+    if (S.auto) { rollOpponent(); newRound(); }   // full auto-play: silent, no splash
+    else playVsThenStart();                       // 自動下一局: VS splash reveals the new opponent
   }
 
   function humanAct(dec) {
@@ -1154,7 +1334,8 @@ if (typeof document !== 'undefined') {
     const g = S.g;
     if (!g) return;
     $('round-num').textContent = S.round;
-    $('suit-name').textContent = SUIT_NAME[g.suit];
+    $('suit-name').innerHTML = doraFace(g);
+    $('suit-stamp').style.display = 'inline-flex';
     // elite hand-limit rounds end at handLimit draws/seat (not wall exhaustion),
     // so show the shared remaining-draw budget (handLimit×2 − draws used) instead of raw wall size
     $('wall-count').textContent = g.sk.handLimit
@@ -1164,10 +1345,7 @@ if (typeof document !== 'undefined') {
     $('wager-info').textContent = `${TEXT.wager} ${g.base * CONFIG.LOSS_CAP_MULT}（底注 ${g.base}）`;
     $('dealer-you').style.display = g.dealer === 0 ? 'inline-flex' : 'none';
     $('dealer-ai').style.display = g.dealer === 1 ? 'inline-flex' : 'none';
-    const mult = g.passMult[0];
-    const mb = $('mult-badge');
-    mb.style.display = mult > 1 ? 'inline-flex' : 'none';
-    mb.textContent = '×' + mult;
+    renderPassMult(g);
     $('ting-you').style.display = g.ting[0] ? 'inline-flex' : 'none';
     $('ting-ai').style.display = g.ting[1] ? 'inline-flex' : 'none';
 
@@ -1177,6 +1355,10 @@ if (typeof document !== 'undefined') {
     const tl = $('ting-live');
     if (g.ting[0] && !roundDecided) buildWaitsPanel(tl, liveWaitsInfo(), null);
     else tl.innerHTML = '';
+
+    // surface the fold: declaring ting has to visibly scare the opponent off, or the
+    // trade-off (locked hand + 1 fan vs. a defending opponent) is invisible to the player
+    $('fold-ai').style.display = (!roundDecided && defenseMode(g, 1) === 2) ? 'inline-flex' : 'none';
 
     // AI zone: face-down while playing (bet tier reveals some tiles), all revealed once decided
     const ah = $('ai-hand'); ah.innerHTML = '';
@@ -1267,7 +1449,10 @@ if (typeof document !== 'undefined') {
       m.tiles.forEach((t, i) => {
         // concealed kong: reveal the middle two so the konged tile is visible
         const hidden = m.sub === 'an' && (i === 0 || i === 3);
-        grp.appendChild(hidden ? tileEl(0, { back: true, cls: 'small' }) : tileEl(t, { cls: 'small' }));
+        // melds score the dora too (hand + melds), so they carry the same highlight —
+        // this also lets the player see the AI sitting on copies
+        grp.appendChild(hidden ? tileEl(0, { back: true, cls: 'small' })
+                               : tileEl(t, { cls: 'small' + (S.g && t === S.g.dora ? ' dora' : '') }));
       });
       el.appendChild(grp);
     }
@@ -1319,6 +1504,7 @@ if (typeof document !== 'undefined') {
         cls: (canDiscard && !locked ? 'clickable' : '') +
              (S.tingMode && tingOK && !tingOK.has(t) ? ' dim' : '') +
              (isSel ? ' sel' : '') +
+             (t === g.dora ? ' dora' : '') +
              (hitKinds.has(t) ? ' match-glow' : ''),
       });
       if (canDiscard && !locked && (!S.tingMode || (tingOK && tingOK.has(t)))) {
@@ -1502,6 +1688,7 @@ if (typeof document !== 'undefined') {
   function hideOverlay() { $('overlay').style.display = 'none'; }
 
   function init() {
+    S.unlocked = loadUnlocks();
     $('next-btn').onclick = advanceAfterSettle;
     $('auto-toggle').onchange = e => { S.auto = e.target.checked; drive(); };
     // two autoNext checkboxes (in-play bottom-right + bet screen) share one state

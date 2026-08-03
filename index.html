@@ -4,15 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>雀聖對決</title>
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 <body>
   <div id="topbar">
     <span class="brand">雀聖對決</span>
     <span class="info">第 <b id="round-num">-</b> 局</span>
-    <span class="info">本局花色：<b id="suit-name">-</b></span>
+    <span class="stat suit" id="suit-stamp" style="display:none">
+      <span class="stat-label">本場寶牌</span>
+      <span class="suit-tile" id="suit-name">-</span>
+    </span>
     <span class="info" id="wager-info"></span>
-    <span class="badge mult" id="mult-badge" style="display:none">×1</span>
     <span class="spacer"></span>
     <span class="info">持分 <b id="credits">-</b></span>
     <label id="autoplay-label"><input type="checkbox" id="auto-toggle">自動玩</label>
@@ -24,6 +26,7 @@
         <span class="zone-label">莊家</span>
         <span class="badge dealer" id="dealer-ai" style="display:none">莊</span>
         <span class="badge ting" id="ting-ai" style="display:none">聽</span>
+        <span class="badge fold" id="fold-ai" style="display:none">棄和</span>
         <div id="ai-hand"></div>
         <div class="melds" id="ai-melds"></div>
       </div>
@@ -40,6 +43,10 @@
         <span class="zone-label">你</span>
         <span class="badge dealer" id="dealer-you" style="display:none">莊</span>
         <span class="badge ting" id="ting-you" style="display:none">聽</span>
+        <span class="stat mult" id="mult-badge" style="display:none">
+          <span class="stat-label">過水倍數</span>
+          <span class="stat-value"><b id="mult-value">×1</b><i id="mult-times"></i></span>
+        </span>
         <div id="ting-live"></div>
         <div id="actions"></div>
       </div>
@@ -48,6 +55,7 @@
   </div>
 
   <div id="betsel">
+    <div id="bs-roster"></div>
     <div id="betsel-card">
       <div class="bs-logo"><img src="assets/logo.png?v=6" alt="雀聖對決"></div>
       <div class="bs-difftabs">
@@ -86,6 +94,17 @@
     </div>
   </div>
 
+  <div id="suit-anim">
+    <div id="suit-inner">
+      <div id="suit-title">本場寶牌</div>
+      <div id="suit-stage">
+        <span id="suit-ring"></span>
+        <span class="suit-tile big" id="suit-big">筒</span>
+      </div>
+      <div id="suit-note">持有一張 ＋1 台</div>
+    </div>
+  </div>
+
   <div id="bonus">
     <div id="bonus-card">
       <div id="bonus-title"></div>
@@ -111,14 +130,14 @@
     <div id="opp-name"></div>
   </div>
 
-  <label id="autonext-label"><input type="checkbox" id="autonext-toggle">自動下一局（同對手同注額）</label>
+  <label id="autonext-label"><input type="checkbox" id="autonext-toggle">自動下一局（同桌型同注額，對手重抽）</label>
 
   <div id="debug">
     <button id="debug-toggle">⚙</button>
     <div id="debug-body"></div>
   </div>
 
-  <script src="data.js?v=6"></script>
-  <script src="game.js?v=7"></script>
+  <script src="data.js?v=11"></script>
+  <script src="game.js?v=14"></script>
 </body>
 </html>
