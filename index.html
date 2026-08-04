@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>雀聖對決</title>
-<link rel="stylesheet" href="style.css?v=12">
+<link rel="stylesheet" href="style.css?v=13">
 </head>
 <body>
   <div id="topbar">
@@ -12,7 +12,7 @@
     <span class="info">第 <b id="round-num">-</b> 局</span>
     <span class="stat suit" id="suit-stamp" style="display:none">
       <span class="stat-label">本場寶牌</span>
-      <span class="suit-tile" id="suit-name">-</span>
+      <span id="suit-name"></span>
     </span>
     <span class="info" id="wager-info"></span>
     <span class="spacer"></span>
@@ -59,24 +59,24 @@
     <div id="betsel-card">
       <div class="bs-logo"><img src="assets/logo.png?v=6" alt="雀聖對決"></div>
       <div class="bs-difftabs">
-        <button class="bs-difftab" id="diff-normal">一般局</button>
-        <button class="bs-difftab" id="diff-expert">高手局</button>
-        <button class="bs-difftab" id="diff-elite">菁英局</button>
+        <button class="bs-difftab" id="diff-rookie">新手桌</button>
+        <button class="bs-difftab" id="diff-expert">高手桌</button>
+        <button class="bs-difftab" id="diff-master">大師桌</button>
       </div>
       <div class="bs-mid">
         <div class="bs-panel">
           <div class="bs-line">贏分無上限，最多輸 16 倍</div>
-          <div class="bs-line big">下方選擇投注金額</div>
-          <div class="bs-line">持有金幣需 ≥ <span id="bs-req-num" class="bs-req">1600</span></div>
-          <div class="bs-line" id="bs-reveal"></div>
-          <div class="bs-line small" id="bs-diffinfo"></div>
+          <div class="bs-line big" id="bs-range"></div>
+          <div class="bs-line">底注 <span id="bs-base" class="bs-req">100</span></div>
+          <div class="bs-line" id="bs-dora"></div>
+          <div class="bs-line small" id="bs-ainote"></div>
           <div class="bs-line small">持分 <span id="bs-credits"></span></div>
         </div>
       </div>
       <div class="bs-bottom">
         <div class="bs-stepper">
           <button id="bs-minus">−</button>
-          <div class="bs-amount-box"><b id="bs-amount">100</b><span>總投注額</span></div>
+          <div class="bs-amount-box"><b id="bs-amount">1600</b><span>總投注額（最多輸）</span></div>
           <button id="bs-plus">＋</button>
         </div>
         <button id="bs-start">開局</button>
@@ -99,7 +99,7 @@
       <div id="suit-title">本場寶牌</div>
       <div id="suit-stage">
         <span id="suit-ring"></span>
-        <span class="suit-tile big" id="suit-big">筒</span>
+        <span id="suit-big"></span>
       </div>
       <div id="suit-note">持有一張 ＋1 台</div>
     </div>
@@ -137,7 +137,7 @@
     <div id="debug-body"></div>
   </div>
 
-  <script src="data.js?v=11"></script>
-  <script src="game.js?v=14"></script>
+  <script src="data.js?v=12"></script>
+  <script src="game.js?v=15"></script>
 </body>
 </html>

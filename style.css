@@ -294,6 +294,11 @@ body {
   color: #fff; border-color: var(--gold);
   box-shadow: 0 0 12px rgba(240,199,94,.5);
 }
+/* out of reach on the current balance — dimmed but still clickable, because reading what the
+   next table costs is what makes it worth playing towards */
+.bs-difftab.locked { opacity: .45; }
+.bs-difftab.locked::before { content: '🔒 '; font-weight: normal; }
+.bs-difftab.locked.active { opacity: .8; }
 .bs-panel {
   background: rgba(0,0,0,.85); border-radius: 10px;
   padding: 22px 34px; width: 100%;
@@ -444,6 +449,7 @@ body.bonus-open #p-hand { position: relative; z-index: 10; }
   background: rgba(0,0,0,.4); border: 1px solid rgba(240,199,94,.45);
 }
 .stat.suit .stat-label { font-size: 11px; opacity: .7; letter-spacing: 1px; }
+#suit-name { display: inline-flex; align-items: center; gap: 4px; }
 /* stamped in as the splash hands off, so the eye follows it from centre to top bar */
 .stat.suit.stamp .suit-tile { animation: suitStampSmall .45s cubic-bezier(.2,.9,.3,1.5) both; }
 @keyframes suitStampSmall {
@@ -464,14 +470,19 @@ body.bonus-open #p-hand { position: relative; z-index: 10; }
   text-shadow: 0 0 26px rgba(240,199,94,.75), 0 6px 0 rgba(0,0,0,.35);
 }
 #suit-stage { position: relative; display: flex; align-items: center; justify-content: center; }
+#suit-big { display: flex; align-items: center; gap: 16px; }
 .suit-tile.big {
   width: 132px; height: 178px; border-radius: 16px; font-size: 92px;
   box-shadow: 0 10px 30px rgba(0,0,0,.6), inset 0 -4px 0 rgba(0,0,0,.1),
               0 0 42px rgba(240,199,94,.55);
 }
-/* expanding ring = the "press" of the stamp landing */
+/* 2-3 dora tiers: shrink so three tiles still fit a phone-width stage */
+#suit-big.multi { gap: 12px; }
+#suit-big.multi .suit-tile.big { width: 92px; height: 124px; border-radius: 12px; font-size: 62px; }
+/* expanding ring = the "press" of the stamp landing. Sized to the stage rather than one tile,
+   so it frames whatever number of dora this table announced. */
 #suit-ring {
-  position: absolute; width: 132px; height: 178px; border-radius: 16px;
+  position: absolute; inset: -6px; border-radius: 20px;
   border: 3px solid rgba(240,199,94,.9); opacity: 0; pointer-events: none;
 }
 #suit-note {
@@ -485,6 +496,10 @@ body.bonus-open #p-hand { position: relative; z-index: 10; }
 }
 #suit-anim.run #suit-title { animation: suitTitleIn .5s ease both; }
 #suit-anim.run .suit-tile.big { animation: suitStampIn .6s cubic-bezier(.2,.9,.3,1.5) .18s both; }
+/* stagger multi-dora so they land one at a time — three tiles slamming in together reads as
+   one wide object rather than three separate tiles the player needs to memorise */
+#suit-anim.run #suit-big .suit-tile:nth-child(2) { animation-delay: .32s; }
+#suit-anim.run #suit-big .suit-tile:nth-child(3) { animation-delay: .46s; }
 #suit-anim.run #suit-ring { animation: suitRing .7s ease-out .34s both; }
 @keyframes suitTitleIn {
   0%   { opacity: 0; transform: translateY(-22px); letter-spacing: 26px; }

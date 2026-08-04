@@ -5,7 +5,7 @@ const CONFIG = {
   BASE: 10,                // default base stake for headless sim (UI picks from the tier's bets[])
   LOSS_CAP_MULT: 16,       // player loss cap in units of base; also the per-game wager
   PASS_MULT_CAP: 64,       // pass-up (guo-shui) multiplier cap = 2^6
-  START_CREDITS: 5000000,  // demo starting credits
+  START_CREDITS: 100000,   // demo starting credits; stake windows are a share of this (see DIFFS)
   RTP_TARGET: 0.95,        // display fallback for the stats readout before any games
   RTP_WINDOW: 400,         // rolling window size (games) for the RTP readout
   SUIT_SPLASH_MS: 1600,    // round-dora splash duration (tap to skip)
@@ -112,26 +112,40 @@ const FAN = {
 // Duihua bonus: P(0/1/2/3 matches) — cumulative thresholds
 const DUIHUA_PROBS = [0.5, 0.85, 0.95, 1.0];
 
-// Three decoupled axes: character (skin only), difficulty (skill set + min stake),
-// and stake (global ladder, gated by the difficulty's minBet).
+// Three decoupled axes: character (skin only), table tier (stake window + opponent strength +
+// dora count), and stake (global ladder, windowed by the tier).
 //
-// Global base-stake ladder. Per-game wager / loss cap = bet × LOSS_CAP_MULT.
-const BET_LADDER = [100, 300, 500, 1000, 2000, 5000, 10000, 50000, 100000];
+// Global base-stake ladder. Per-game wager / loss cap = bet × LOSS_CAP_MULT, so every rung is a
+// base stake and every wager is automatically a multiple of LOSS_CAP_MULT. Spacing is ~1.5-2x
+// so each tier's percentage window lands on 3-4 selectable rungs.
+const BET_LADDER = [100, 150, 200, 300, 500, 800, 1250, 2000, 3000, 5000, 8000, 12500, 20000];
 
-// Difficulty = skill set + minimum stake. Characters no longer own these.
-// skill flags: pass = pass-doubling, reveal = stake-based hand reveal,
-// handLimit = max draws per seat (0 = unlimited). Haidi + base duihua are universal, so they
-// are not part of any tier's identity and are not listed on the bet screen.
-// One perk per tier, deliberately NOT cumulative: normal = hand limit, expert = reveal,
-// elite = pass-doubling. Each table gives up what the others have, so picking a tier is
-// picking a style rather than buying a bigger version of the same thing.
-// reveal count itself comes from revealForBet(bet) in game.js (absolute stake → tiles),
-// so it stays independent of both character and difficulty tier index.
-const DIFF_ORDER = ['normal', 'expert', 'elite'];
+// Table tier. The RULES are identical on all three tables — pass-doubling, full wall, no hand
+// reveal — because moving up must buy a bigger bet, a tougher opponent and a fatter dora, never
+// a new player ability. A tier that hands the player extra tools reads as "pay to unlock easy
+// mode", which is backwards: picking the master table means asking for a HARDER game.
+//
+// betPct = [min, max] share of the player's credits allowed as the per-game wager
+//   (bet × LOSS_CAP_MULT). Percentage-of-bankroll rather than absolute values, so the window
+//   slides down as the player loses (built-in de-leveraging) and the entry threshold can never
+//   lock a solvent player out. Max stops at 80% deliberately: at 100% one hand can zero the
+//   player AND leave them unable to open the next one, which reads as "the machine ate me".
+// dora = round-dora tiles announced at deal, scored by BOTH seats — the reward axis.
+// defendPush = opponent's push/fold discipline after the player declares ting: it keeps
+//   attacking while its own shanten <= this, otherwise it folds. null = never defends (weakest).
+//   Lower = stricter = fewer tiles fed to the player = harder. Fixed per table and printed on
+//   the bet screen; never re-tuned mid-session, because a table that silently adjusts its AI is
+//   manipulation, while one that is fixed and labelled is just a harder table.
+// minCredits = absolute balance gate. Needed on top of betPct because a percentage window alone
+//   scales all the way down: a nearly broke player would otherwise qualify for the master table
+//   at the minimum rung, collecting 3 dora and (Phase 2) jackpot eligibility for pocket change.
+//   It is also the aspiration hook — "8,000 more and the next table opens" is a far better
+//   reason to keep playing than running the balance to zero.
+const DIFF_ORDER = ['rookie', 'expert', 'master'];
 const DIFFS = {
-  normal: { name: '一般局', minBet: 100,  skill: { pass: false, reveal: false, handLimit: 10 } },
-  expert: { name: '高手局', minBet: 500,  skill: { pass: false, reveal: true,  handLimit: 0 } },
-  elite:  { name: '菁英局', minBet: 2000, skill: { pass: true,  reveal: false, handLimit: 0 } },
+  rookie: { name: '新手桌', minCredits: 0,     betPct: [0.03, 0.15], dora: 1, defendPush: null, aiNote: '對手不防守' },
+  expert: { name: '高手桌', minCredits: 20000, betPct: [0.10, 0.50], dora: 2, defendPush: 1,    aiNote: '對手會防你的聽牌' },
+  master: { name: '大師桌', minCredits: 50000, betPct: [0.20, 0.80], dora: 3, defendPush: 0,    aiNote: '對手防守嚴謹，只在自己聽牌時才推' },
 };
 
 // Opponent characters — pure skins. All 6 selectable in any difficulty / stake.
@@ -164,7 +178,6 @@ const TEXT = {
   youWin: '你胡了', aiWin: '莊家胡了',
   netWin: '贏', netLose: '輸',
   total: '合計',
-  suitOfRound: '本局花色',
   doraLabel: '本場寶牌',
   doraNote: '持有一張 ＋1 台',
   chooseChi: '選擇吃牌組合',
@@ -184,16 +197,12 @@ const TEXT = {
   betAmount: '總投注額',
   betStart: '開局',
   betShort: '金幣不足',
-  revealPrefix: '對手亮牌 ',
-  revealUnit: ' 張',
-  revealNone: '對手不亮牌',
   chooseOpp: '選擇對手',
-  chooseDiff: '選擇難度',
-  betRange: '底注 ',
-  perkPass: '過水加倍',
-  perkHandLimit: '限 ', perkHandLimitUnit: ' 手',
-  perkNone: '－',
-  minBetPrefix: '底注需 ≥ ',
+  chooseDiff: '選擇桌次',
+  // bet-screen tier readout: what actually differs between the three tables
+  tierBet: '注額 ', tierBetSep: '～',
+  tierDora: '本場寶牌 ', tierDoraUnit: ' 張',
+  tierNeedPrefix: '需持有金幣 ≥ ',
 };
 
 if (typeof module !== 'undefined') {
