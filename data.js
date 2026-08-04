@@ -5,7 +5,7 @@ const CONFIG = {
   BASE: 10,                // default base stake for headless sim (UI picks from the tier's bets[])
   LOSS_CAP_MULT: 16,       // player loss cap in units of base; also the per-game wager
   PASS_MULT_CAP: 64,       // pass-up (guo-shui) multiplier cap = 2^6
-  START_CREDITS: 100000,   // demo starting credits; stake windows are a share of this (see DIFFS)
+  START_CREDITS: 100000,   // demo starting credits; picks the stake band the demo opens in
   RTP_TARGET: 0.95,        // display fallback for the stats readout before any games
   RTP_WINDOW: 400,         // rolling window size (games) for the RTP readout
   SUIT_SPLASH_MS: 1600,    // round-dora splash duration (tap to skip)
@@ -115,37 +115,53 @@ const DUIHUA_PROBS = [0.5, 0.85, 0.95, 1.0];
 // Three decoupled axes: character (skin only), table tier (stake window + opponent strength +
 // dora count), and stake (global ladder, windowed by the tier).
 //
-// Global base-stake ladder. Per-game wager / loss cap = bet × LOSS_CAP_MULT, so every rung is a
-// base stake and every wager is automatically a multiple of LOSS_CAP_MULT. Spacing is ~1.5-2x
-// so each tier's percentage window lands on 3-4 selectable rungs.
-const BET_LADDER = [100, 150, 200, 300, 500, 800, 1250, 2000, 3000, 5000, 8000, 12500, 20000];
+// Stake selection is a LOOKUP TABLE on the player's balance, not a percentage formula.
+//
+// A percentage window (wager = x% of credits) reads well but fails silently at the top: any
+// finite ladder eventually runs out of rungs, and past that point every tier collapses onto the
+// same highest rung — three tables that differ only in dora and AI, with the "bet bigger" axis
+// gone. It failed above ~1.6M credits, and the stake axis is the one difference the tier system
+// is actually built on. A table makes the ceiling an explicit policy number instead of an
+// accident of where the ladder happened to stop.
+//
+// Rows are balance bands; `rungs` are the 8 base stakes that band offers. Per-game wager =
+// bet × LOSS_CAP_MULT, and that wager is simultaneously the loss cap AND the entry threshold, so
+// a rung costing more than the balance is simply unselectable — that affordability check is the
+// only gate, there are no artificial tier thresholds. Every band offers all three tables.
+//
+// Band is re-evaluated only on the bet screen (see advanceAfterSettle): recomputing every round
+// would make the whole ladder shift under a player who is grinding near a band boundary.
+const STAKE_BANDS = [
+  { max: 30000,         rungs: [100,   150,   200,   300,   500,   800,   1000,   1500] },
+  { max: 100000,        rungs: [200,   300,   500,   800,   1000,  1500,  2000,   3000] },
+  { max: 500000,        rungs: [800,   1000,  1500,  2000,  3000,  5000,  8000,   10000] },
+  { max: 2000000,       rungs: [3000,  5000,  8000,  10000, 15000, 20000, 30000,  50000] },
+  { max: Infinity,      rungs: [10000, 15000, 20000, 30000, 50000, 80000, 150000, 200000] },
+];
 
 // Table tier. The RULES are identical on all three tables — pass-doubling, full wall, no hand
 // reveal — because moving up must buy a bigger bet, a tougher opponent and a fatter dora, never
 // a new player ability. A tier that hands the player extra tools reads as "pay to unlock easy
 // mode", which is backwards: picking the master table means asking for a HARDER game.
 //
-// betPct = [min, max] share of the player's credits allowed as the per-game wager
-//   (bet × LOSS_CAP_MULT). Percentage-of-bankroll rather than absolute values, so the window
-//   slides down as the player loses (built-in de-leveraging) and the entry threshold can never
-//   lock a solvent player out. Max stops at 80% deliberately: at 100% one hand can zero the
-//   player AND leave them unable to open the next one, which reads as "the machine ate me".
+// slots = [first, last] 0-based indices into the current band's `rungs`. Same window on every
+//   band, so the whole stake ladder is retuned by editing STAKE_BANDS alone. Windows overlap by
+//   design (rookie's top rung IS expert's bottom rung) so switching table keeps the money
+//   continuous instead of jumping a gap. The master table's top rung deliberately costs more
+//   than the band's lower boundary: a player sitting at the bottom of a band cannot afford it and
+//   has to climb into the band's upper half first, which is what stops the biggest stake from
+//   being something everyone can just pick on arrival.
 // dora = round-dora tiles announced at deal, scored by BOTH seats — the reward axis.
 // defendPush = opponent's push/fold discipline after the player declares ting: it keeps
 //   attacking while its own shanten <= this, otherwise it folds. null = never defends (weakest).
 //   Lower = stricter = fewer tiles fed to the player = harder. Fixed per table and printed on
 //   the bet screen; never re-tuned mid-session, because a table that silently adjusts its AI is
 //   manipulation, while one that is fixed and labelled is just a harder table.
-// minCredits = absolute balance gate. Needed on top of betPct because a percentage window alone
-//   scales all the way down: a nearly broke player would otherwise qualify for the master table
-//   at the minimum rung, collecting 3 dora and (Phase 2) jackpot eligibility for pocket change.
-//   It is also the aspiration hook — "8,000 more and the next table opens" is a far better
-//   reason to keep playing than running the balance to zero.
 const DIFF_ORDER = ['rookie', 'expert', 'master'];
 const DIFFS = {
-  rookie: { name: '新手桌', minCredits: 0,     betPct: [0.03, 0.15], dora: 1, defendPush: null, aiNote: '對手不防守' },
-  expert: { name: '高手桌', minCredits: 20000, betPct: [0.10, 0.50], dora: 2, defendPush: 1,    aiNote: '對手會防你的聽牌' },
-  master: { name: '大師桌', minCredits: 50000, betPct: [0.20, 0.80], dora: 3, defendPush: 0,    aiNote: '對手防守嚴謹，只在自己聽牌時才推' },
+  rookie: { name: '新手桌', slots: [0, 2], dora: 1, defendPush: null, aiNote: '對手不防守' },
+  expert: { name: '高手桌', slots: [2, 5], dora: 2, defendPush: 1,    aiNote: '對手會防你的聽牌' },
+  master: { name: '大師桌', slots: [4, 7], dora: 3, defendPush: 0,    aiNote: '對手防守嚴謹，只在自己聽牌時才推' },
 };
 
 // Opponent characters — pure skins. All 6 selectable in any difficulty / stake.
@@ -206,5 +222,5 @@ const TEXT = {
 };
 
 if (typeof module !== 'undefined') {
-  module.exports = { CONFIG, KINDS, SUITS, SUIT_NAME, NUM_NAME, HONOR_NAME, FAN, TEXT, DUIHUA_PROBS, CHARS, BET_LADDER, DIFFS, DIFF_ORDER };
+  module.exports = { CONFIG, KINDS, SUITS, SUIT_NAME, NUM_NAME, HONOR_NAME, FAN, TEXT, DUIHUA_PROBS, CHARS, STAKE_BANDS, DIFFS, DIFF_ORDER };
 }

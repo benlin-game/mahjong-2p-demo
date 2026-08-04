@@ -588,8 +588,8 @@ function newGame(seed, dealer, base, sk) {
   // Drawn from a SIDE stream, never from rng(): pulling extra values out of rng() would shift
   // the whole wall and invalidate every existing sim baseline. A side hash is also needed because
   // nextGameSeed() does not guarantee uniform low bits. Partial Fisher-Yates over 1-9 keeps the
-  // picks distinct, so a tier with 3 dora
-  // really is 3 different tiles rather than a chance at one tile counted three times.
+  // picks distinct, so a tier with 3 dora really is 3 different tiles rather than a chance at one
+  // tile counted three times.
   const drng = mulberry32(seed ^ 0x5bf03635);
   const dpool = [1, 2, 3, 4, 5, 6, 7, 8, 9];
   const dcount = Math.max(1, Math.min(9, (sk && sk.doraCount) || 1));
@@ -1060,7 +1060,7 @@ if (typeof document !== 'undefined') {
     machine: createMachine(Date.now() & 0x7fffffff),
     round: 0, g: null, auto: false, speed: 500,
     tingMode: false, tingSelect: null, timer: null,
-    betIdx: 0, charIdx: 0, diffKey: 'rookie', autoNext: false, vsTimer: null, suitTimer: null,
+    betIdx: 0, charIdx: 0, diffKey: 'rookie', bandIdx: 0, autoNext: false, vsTimer: null, suitTimer: null,
     unlocked: null,         // Set of unlocked CHARS ids; filled from storage on boot
     lastMult: 1,            // last rendered pass multiplier, to fire the bump animation once
   };
@@ -1086,29 +1086,33 @@ if (typeof document !== 'undefined') {
 
   function curChar() { return CHARS[S.charIdx]; }        // pure skin
   function curDiff() { return DIFFS[S.diffKey]; }        // stake window + opponent + dora count
-  function curBet() { return BET_LADDER[S.betIdx]; }     // global stake ladder
+  // Which balance band the player is in, and that band's rung list.
+  function bandIndexFor(credits) {
+    const i = STAKE_BANDS.findIndex(b => credits <= b.max);
+    return i < 0 ? STAKE_BANDS.length - 1 : i;
+  }
+  function bandRungs(credits) { return STAKE_BANDS[bandIndexFor(credits)].rungs; }
+  function curBet() { return bandRungs(S.credits)[S.betIdx]; }
 
-  // Ladder window for a tier, derived from the player's balance: the per-game wager
-  // (bet × LOSS_CAP_MULT) must sit inside [betPct[0], betPct[1]] of credits.
-  // Returns { lo, hi } ladder indices, or null when the table is out of reach.
-  //
-  // The upper bound is floored at the lowest rung: a small balance can make even 15% of credits
-  // land below the minimum wager, and refusing to serve that player at all would be worse than
-  // letting them sit slightly above their nominal share. The lower bound is a soft one — it
-  // exists to push a wealthy player up a table, so it collapses onto `hi` rather than emptying
-  // the window. Because every pct is < 1, a playable window also guarantees the entry threshold
-  // (credits >= wager) is met, so affordability needs no separate check.
+  // Selectable rungs for a tier: its fixed slot window inside the band, trimmed to what the
+  // balance can actually cover. The wager IS both the loss cap and the entry threshold, so a rung
+  // priced above the balance is unplayable rather than merely risky — and that affordability trim
+  // is the ONLY gate. There is no artificial tier threshold: every band offers all three tables,
+  // and the only players who cannot reach the master table are those who cannot cover its
+  // cheapest loss cap.
+  // Returns { lo, hi } indices into the band's rungs, or null when even the tier's cheapest rung
+  // is unaffordable.
   function betWindow(diff, credits) {
-    if (credits < diff.minCredits) return null;   // absolute tier gate — must come first, or the
-    const M = CONFIG.LOSS_CAP_MULT;               // percentage window would admit a broke player
-    const hiBet = Math.max(BET_LADDER[0], credits * diff.betPct[1] / M);
-    let hi = -1;
-    for (let i = 0; i < BET_LADDER.length; i++) if (BET_LADDER[i] <= hiBet) hi = i;
-    if (hi < 0 || BET_LADDER[0] * M > credits) return null;   // cannot afford the cheapest rung
-    const loBet = credits * diff.betPct[0] / M;
-    let lo = BET_LADDER.findIndex(b => b >= loBet);
-    if (lo < 0 || lo > hi) lo = hi;
-    return { lo, hi };
+    const rungs = bandRungs(credits);
+    const M = CONFIG.LOSS_CAP_MULT;
+    const lo = diff.slots[0];
+    let hi = Math.min(diff.slots[1], rungs.length - 1);
+    while (hi >= lo && rungs[hi] * M > credits) hi--;
+    return hi < lo ? null : { lo, hi };
+  }
+  // what the balance would have to be for this tier to open at all (its cheapest wager)
+  function tierEntryCost(diff, credits) {
+    return bandRungs(credits)[diff.slots[0]] * CONFIG.LOSS_CAP_MULT;
   }
   const $ = id => document.getElementById(id);
 
@@ -1146,6 +1150,7 @@ if (typeof document !== 'undefined') {
     const seed = nextGameSeed(S.machine, dealer);
     const diff = curDiff();
     const bet = curBet();
+    S.bandIdx = bandIndexFor(S.credits);   // frozen for the round; only the bet screen re-reads it
     // the tier only carries reward + opponent strength; the rule set is identical everywhere
     const sk = { doraCount: diff.dora, defendPush: diff.defendPush };
     S.g = newGame(seed, dealer, bet, sk);
@@ -1297,10 +1302,11 @@ if (typeof document !== 'undefined') {
   function renderBetSel() {
     const diff = curDiff();
     const M = CONFIG.LOSS_CAP_MULT;
+    const rungs = bandRungs(S.credits);
     DIFF_ORDER.forEach(k => {
       const el = $('diff-' + k);
       el.classList.toggle('active', k === S.diffKey);
-      el.classList.toggle('locked', S.credits < DIFFS[k].minCredits);
+      el.classList.toggle('locked', !betWindow(DIFFS[k], S.credits));
     });
     $('bs-dora').textContent = TEXT.tierDora + diff.dora + TEXT.tierDoraUnit;
     $('bs-ainote').textContent = diff.aiNote;
@@ -1310,7 +1316,7 @@ if (typeof document !== 'undefined') {
     if (!win) {
       // Out of reach. Deliberately still selectable: seeing what the next table costs is the
       // hook that makes it worth playing towards, which a greyed-out unclickable tab loses.
-      $('bs-range').textContent = TEXT.tierNeedPrefix + Math.max(diff.minCredits, BET_LADDER[0] * M);
+      $('bs-range').textContent = TEXT.tierNeedPrefix + tierEntryCost(diff, S.credits);
       $('bs-amount').textContent = '-';
       $('bs-base').textContent = '-';
       btn.disabled = true;
@@ -1321,7 +1327,7 @@ if (typeof document !== 'undefined') {
     }
     S.betIdx = Math.min(Math.max(S.betIdx, win.lo), win.hi);   // keep the stake inside the window
     const bet = curBet();
-    $('bs-range').textContent = TEXT.tierBet + (BET_LADDER[win.lo] * M) + TEXT.tierBetSep + (BET_LADDER[win.hi] * M);
+    $('bs-range').textContent = TEXT.tierBet + (rungs[win.lo] * M) + TEXT.tierBetSep + (rungs[win.hi] * M);
     $('bs-amount').textContent = bet * M;
     $('bs-base').textContent = bet;
     btn.disabled = false;
@@ -1368,14 +1374,16 @@ if (typeof document !== 'undefined') {
 
   function advanceAfterSettle() {
     clearTimeout(S.timer);
-    // The stake window is a share of the balance, so winning or losing can move the locked-in
-    // stake out of range even while it stays affordable. Full auto-play (a dev/demo loop) clamps
-    // and keeps rolling; 自動下一局 sends the player back to the bet screen instead, because
-    // silently moving someone's bet is exactly the kind of thing that reads as manipulation.
+    // Winning or losing can move the player across a band boundary, which swaps the entire rung
+    // list under them, or make the locked-in stake unaffordable. Either way the stake no longer
+    // means what they picked, so 自動下一局 goes back to the bet screen — silently re-pricing
+    // someone's bet is exactly the kind of thing that reads as manipulation. Full auto-play (a
+    // dev/demo loop) clamps and keeps rolling instead.
     const win = betWindow(curDiff(), S.credits);
+    const bandMoved = bandIndexFor(S.credits) !== S.bandIdx;
     if (!win || !(S.auto || S.autoNext)) { showBetSel(); return; }
     if (S.auto) S.betIdx = Math.min(Math.max(S.betIdx, win.lo), win.hi);
-    else if (S.betIdx < win.lo || S.betIdx > win.hi) { showBetSel(); return; }
+    else if (bandMoved || S.betIdx < win.lo || S.betIdx > win.hi) { showBetSel(); return; }
     // both auto paths keep stake + difficulty and re-draw the opponent; only the reveal differs
     if (S.auto) { rollOpponent(); newRound(); }   // full auto-play: silent, no splash
     else playVsThenStart();                       // 自動下一局: VS splash reveals the new opponent
