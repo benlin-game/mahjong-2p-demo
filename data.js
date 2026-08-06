@@ -9,6 +9,11 @@ const CONFIG = {
   RTP_TARGET: 0.95,        // display fallback for the stats readout before any games
   RTP_WINDOW: 400,         // rolling window size (games) for the RTP readout
   SUIT_SPLASH_MS: 1600,    // round-dora splash duration (tap to skip)
+  DICE_ROLL_MS: 780,       // dealer-dice tumble duration before the faces lock
+  DICE_HOLD_MS: 950,       // how long the locked result (point + who-deals) is held
+  DEAL_STAGGER_MS: 68,     // gap between each tile in the entry draw-in (13 tiles ≈ 1s)
+  DEAL_ENTER_MS: 170,      // per-tile entrance duration in the draw-in
+  DEAL_FLIP_MS: 150,       // half-flip duration for the cover / reveal-sorted gesture
   ACTION_CAP: 400,         // hard safety cap on actions per game (selfTest)
 };
 
@@ -100,17 +105,10 @@ const FAN = {
   qixing:        { name: '七星北斗', fan: 128 },
   // 168
   queshen:       { name: '雀神無雙', fan: 168 },
-  // bonus mini-game (not in the rulebook fan table; player-only duihua bonus)
-  duihua:        { name: '對花', fan: 1 },
   // round dora (not in the rulebook fan table). One number tile of the round suit is
-  // announced at deal time; BOTH seats score every copy they hold (hand + melds), and a
-  // duihua hit on it pays duihuaDora instead of the flat duihua rate.
+  // announced at deal time; BOTH seats score every copy they hold (hand + melds).
   dora:          { name: '本場寶牌', fan: 1 },
-  duihuaDora:    { name: '對花寶牌', fan: 3 },
 };
-
-// Duihua bonus: P(0/1/2/3 matches) — cumulative thresholds
-const DUIHUA_PROBS = [0.5, 0.85, 0.95, 1.0];
 
 // Three decoupled axes: character (skin only), table tier (stake window + opponent strength +
 // dora count), and stake (global ladder, windowed by the tier).
@@ -144,24 +142,24 @@ const STAKE_BANDS = [
 // a new player ability. A tier that hands the player extra tools reads as "pay to unlock easy
 // mode", which is backwards: picking the master table means asking for a HARDER game.
 //
-// slots = [first, last] 0-based indices into the current band's `rungs`. Same window on every
-//   band, so the whole stake ladder is retuned by editing STAKE_BANDS alone. Windows overlap by
-//   design (rookie's top rung IS expert's bottom rung) so switching table keeps the money
-//   continuous instead of jumping a gap. The master table's top rung deliberately costs more
-//   than the band's lower boundary: a player sitting at the bottom of a band cannot afford it and
-//   has to climb into the band's upper half first, which is what stops the biggest stake from
-//   being something everyone can just pick on arrival.
+// The tier is NOT picked separately — it is DERIVED from which rung the chosen stake sits on.
+// Each band has 8 rungs; the 2/3/3 split maps them to tiers:
+//   rung index 0-1 → 新手桌, 2-4 → 高手桌, 5-7 → 大師桌.
+// rungs = [lo, hi] 0-based inclusive index range into the current band's `rungs`. The player
+//   moves one stepper across all 8 rungs; as the stake crosses a boundary the tier (and its
+//   dora / opponent / display) changes with it. So "bet more" and "harder table + fatter reward"
+//   are the same action — moving up must buy a bigger bet + tougher opponent + more dora, never a
+//   new player ability (picking 大師桌 means asking for a HARDER game, not an easier one).
 // dora = round-dora tiles announced at deal, scored by BOTH seats — the reward axis.
-// defendPush = opponent's push/fold discipline after the player declares ting: it keeps
-//   attacking while its own shanten <= this, otherwise it folds. null = never defends (weakest).
-//   Lower = stricter = fewer tiles fed to the player = harder. Fixed per table and printed on
-//   the bet screen; never re-tuned mid-session, because a table that silently adjusts its AI is
-//   manipulation, while one that is fixed and labelled is just a harder table.
+// defendPush = opponent's push/fold discipline after the player declares ting: keeps attacking
+//   while its own shanten <= this, else folds. null = never defends (weakest); lower = harder.
+// strength / turnSec = display-only labels shown on the bet screen (對手強度 普通/中/強、出牌秒數).
+//   turnSec is informational for now (no live turn timer wired yet).
 const DIFF_ORDER = ['rookie', 'expert', 'master'];
 const DIFFS = {
-  rookie: { name: '新手桌', slots: [0, 2], dora: 1, defendPush: null, aiNote: '對手不防守' },
-  expert: { name: '高手桌', slots: [2, 5], dora: 2, defendPush: 1,    aiNote: '對手會防你的聽牌' },
-  master: { name: '大師桌', slots: [4, 7], dora: 3, defendPush: 0,    aiNote: '對手防守嚴謹，只在自己聽牌時才推' },
+  rookie: { name: '新手桌', rungs: [0, 1], dora: 1, defendPush: null, strength: '普通', turnSec: 8, aiNote: '對手不防守' },
+  expert: { name: '高手桌', rungs: [2, 4], dora: 2, defendPush: 1,    strength: '中',   turnSec: 5, aiNote: '對手會防你的聽牌' },
+  master: { name: '大師桌', rungs: [5, 7], dora: 3, defendPush: 0,    strength: '強',   turnSec: 3, aiNote: '對手防守嚴謹，只在自己聽牌時才推' },
 };
 
 // Opponent characters — pure skins. All 6 selectable in any difficulty / stake.
@@ -196,31 +194,13 @@ const TEXT = {
   total: '合計',
   doraLabel: '本場寶牌',
   doraNote: '持有一張 ＋1 台',
+  // dealer dice roll plays on the table with no text; the seated 莊 marker announces the result
   chooseChi: '選擇吃牌組合',
   tingSelect: '選擇打出的牌（維持聽牌）',
   robbed: '搶槓！',
-  haidiTitle: '海底遊戲',
-  haidiNote: '摸三張，摸中聽的牌即胡（計海底撈月）',
-  duihuaTitle: '對花遊戲',
-  duihuaNote: '摸三張，中手牌相同的牌每張 +1 台',
-  bonusLeft: '還可摸',
-  bonusUnit: '張',
-  bonusConfirm: '開牌結算',
-  betTitle: '雀聖對決',
-  betRule: '贏分無上限，最多輸 16 倍',
-  betChoose: '下方選擇投注金額',
-  betReqPrefix: '持有金幣需 ≥ ',
-  betAmount: '總投注額',
   betStart: '開局',
-  betShort: '金幣不足',
-  chooseOpp: '選擇對手',
-  chooseDiff: '選擇桌次',
-  // bet-screen tier readout: what actually differs between the three tables
-  tierBet: '注額 ', tierBetSep: '～',
-  tierDora: '本場寶牌 ', tierDoraUnit: ' 張',
-  tierNeedPrefix: '需持有金幣 ≥ ',
 };
 
 if (typeof module !== 'undefined') {
-  module.exports = { CONFIG, KINDS, SUITS, SUIT_NAME, NUM_NAME, HONOR_NAME, FAN, TEXT, DUIHUA_PROBS, CHARS, STAKE_BANDS, DIFFS, DIFF_ORDER };
+  module.exports = { CONFIG, KINDS, SUITS, SUIT_NAME, NUM_NAME, HONOR_NAME, FAN, TEXT, CHARS, STAKE_BANDS, DIFFS, DIFF_ORDER };
 }

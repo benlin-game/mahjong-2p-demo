@@ -563,22 +563,14 @@ function aiDecision(g) {
     case 'self': return aiSelfDecision(g, p.seat, p.opts);
     case 'claim': return aiClaimDecision(g, p.seat, p.tile, p.opts);
     case 'rob': return { t: 'hu' };
-    case 'haidi':
-    case 'duihua': {
-      if (p.done) return { t: 'resolve' };
-      let i;
-      const taken = p.type === 'haidi' ? p.picks : p.picks.map(x => x.i);
-      do { i = Math.floor(g.rng() * 10); } while (taken.includes(i));
-      return { t: 'pick', i };
-    }
   }
   return null;
 }
 
 // ---- 5. Game engine ----
 
-// sk = per-table profile; defaults preserve the mid tier (pass-doubling on, single duihua, no
-// hand limit, 1 dora, defendPush 1) so existing sims stay comparable. Pass defendPush:null to
+// sk = per-table profile; defaults preserve the mid tier (pass-doubling on, no hand limit,
+// 1 dora, defendPush 1) so existing sims stay comparable. Pass defendPush:null to
 // sim the pure-efficiency AI as a control group.
 function newGame(seed, dealer, base, sk) {
   const rng = mulberry32(seed);
@@ -587,9 +579,9 @@ function newGame(seed, dealer, base, sk) {
   // Count comes from the table tier (sk.doraCount) — it is the tier's reward axis.
   // Drawn from a SIDE stream, never from rng(): pulling extra values out of rng() would shift
   // the whole wall and invalidate every existing sim baseline. A side hash is also needed because
-  // nextGameSeed() does not guarantee uniform low bits. Partial Fisher-Yates over 1-9 keeps the
-  // picks distinct, so a tier with 3 dora really is 3 different tiles rather than a chance at one
-  // tile counted three times.
+  // nextGameSeed() does not guarantee uniform
+  // low bits. Partial Fisher-Yates over 1-9 keeps the picks distinct, so a tier with 3 dora
+  // really is 3 different tiles rather than a chance at one tile counted three times.
   const drng = mulberry32(seed ^ 0x5bf03635);
   const dpool = [1, 2, 3, 4, 5, 6, 7, 8, 9];
   const dcount = Math.max(1, Math.min(9, (sk && sk.doraCount) || 1));
@@ -607,7 +599,7 @@ function newGame(seed, dealer, base, sk) {
     // pass-doubling is baseline on every table (it is core two-player mahjong, not a perk).
     // handLimit stays a sim-only knob: no shipped tier sets it.
     // defendPush: null = no defence (rookie table / pure-efficiency control group in sims).
-    sk: Object.assign({ pass: true, duihua2: false, handLimit: 0, doraCount: 1, defendPush: 1 }, sk || {}),
+    sk: Object.assign({ pass: true, handLimit: 0, doraCount: 1, defendPush: 1 }, sk || {}),
     wall: tiles,
     hands: [[], []], melds: [[], []], rivers: [[], []],
     passMult: [1, 1],
@@ -716,37 +708,9 @@ function finalizeDraw(g) {
   g.result = { winner: -1, net: 0, wager: A, fan: null, mult: 1 };
   g.pending = { type: 'end' };
 }
-// exhaustive draw: player (and only the player) gets the haidi bonus when tenpai
+// exhaustive draw → 流局 (no bonus)
 function endDraw(g) {
-  if (!g.haidiUsed && waitsOf(g, 0).length > 0) {
-    g.haidiUsed = true;
-    g.pending = { type: 'haidi', pool: buildHaidiPool(g), picks: [], done: false };
-    return;
-  }
   finalizeDraw(g);
-}
-function buildHaidiPool(g) {
-  const waits = waitsOf(g, 0);
-  // pool holds 1~3 waited tiles; hit/miss is pure luck in the prototype
-  // (future blacklist/RTP-bin control plugs in HERE: pool composition + placement)
-  const k = 1 + Math.floor(g.rng() * 3);
-  const pool = [];
-  for (let i = 0; i < k && pool.length < 10; i++) {
-    pool.push({ tile: waits[Math.floor(g.rng() * waits.length)], hit: true });
-  }
-  const nonWaits = KINDS.filter(t => !waits.includes(t));
-  while (pool.length < 10) {
-    pool.push({ tile: nonWaits[Math.floor(g.rng() * nonWaits.length)], hit: false });
-  }
-  for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(g.rng() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  return pool;
-}
-function randomNonMatchTile(g, matchTiles) {
-  const s = new Set(matchTiles);
-  const cands = KINDS.filter(k => !s.has(k));
-  return cands[Math.floor(g.rng() * cands.length)];
 }
 
 function visibleCopies(g, tile) {
@@ -766,29 +730,6 @@ function finalizeWin(g, seat, winTile, ctx) {
   // first-turn check must ignore kan replacement draws (rulebook allows ankan → dihu + gangkai)
   ctx.dihu = !!ctx.tsumo && seat !== g.dealer && g.discNum[seat] === 0 && !g.anyCall;
   const fan = calcFan(g, seat, winTile, ctx);
-  if (seat === 0) {
-    // every player win enters the duihua bonus before settlement;
-    // duihua2 characters run the lottery twice: 6 picks, hits = sum of two table samples
-    const rounds = g.sk.duihua2 ? 2 : 1;
-    const need = 3 * rounds;
-    let M = 0;
-    for (let r0 = 0; r0 < rounds; r0++) {
-      const r = g.rng();
-      for (let i = 0; i < DUIHUA_PROBS.length; i++) { if (r < DUIHUA_PROBS[i]) { M += i; break; } }
-    }
-    const slots = [];
-    for (let i = 0; i < need; i++) slots.push(i);
-    for (let i = slots.length - 1; i > 0; i--) {
-      const j = Math.floor(g.rng() * (i + 1)); [slots[i], slots[j]] = [slots[j], slots[i]];
-    }
-    const matchTiles = g.hands[0].slice();
-    if (!ctx.tsumo) matchTiles.push(winTile);
-    g.pending = {
-      type: 'duihua', winTile, tsumo: !!ctx.tsumo, fan, need,
-      hitSlots: slots.slice(0, M), matchTiles, picks: [], reveals: [], done: false,
-    };
-    return;
-  }
   settleResult(g, seat, winTile, !!ctx.tsumo, fan);
 }
 function settleResult(g, seat, winTile, tsumo, fan) {
@@ -916,60 +857,6 @@ function act(g, dec) {
       completeKakan(g, p.kseat, p.tile, p.chained);
       return;
     }
-    case 'haidi': {
-      if (dec.t === 'pick' && !p.done && Number.isInteger(dec.i) && dec.i >= 0 && dec.i < 10 && !p.picks.includes(dec.i)) {
-        p.picks.push(dec.i);
-        if (p.picks.length === 3) p.done = true;
-        return;
-      }
-      if (dec.t === 'resolve' && p.done) {
-        const hit = p.picks.map(i => p.pool[i]).find(x => x.hit);
-        if (hit) finalizeWin(g, 0, hit.tile, { tsumo: false, haidi: true });
-        else finalizeDraw(g);
-      }
-      return;
-    }
-    case 'duihua': {
-      if (dec.t === 'pick' && !p.done && Number.isInteger(dec.i) && dec.i >= 0 && dec.i < 10 && !p.picks.some(x => x.i === dec.i)) {
-        const slot = p.picks.length;
-        const hit = p.hitSlots.includes(slot);
-        const tile = hit
-          ? p.matchTiles[Math.floor(g.rng() * p.matchTiles.length)]
-          : randomNonMatchTile(g, p.matchTiles);
-        p.picks.push({ i: dec.i, tile, hit });
-        if (p.picks.length === (p.need || 3)) {
-          p.done = true;
-          // cosmetic: reveal the 7 unpicked tiles (does not affect settlement)
-          p.rest = [];
-          for (let i = 0; i < 10; i++) {
-            if (p.picks.some(x => x.i === i)) continue;
-            const asMatch = g.rng() < 0.3;
-            p.rest.push({
-              i,
-              tile: asMatch
-                ? p.matchTiles[Math.floor(g.rng() * p.matchTiles.length)]
-                : randomNonMatchTile(g, p.matchTiles),
-            });
-          }
-        }
-        return;
-      }
-      if (dec.t === 'resolve' && p.done) {
-        const hits = p.picks.filter(x => x.hit);
-        const nDora = hits.filter(x => g.doras.includes(x.tile)).length; // dora hits pay the higher rate
-        const M = hits.length - nDora;
-        if (M > 0) {
-          p.fan.items.push({ id: 'duihua', name: FAN.duihua.name, fan: FAN.duihua.fan, n: M });
-          p.fan.total += FAN.duihua.fan * M;
-        }
-        if (nDora > 0) {
-          p.fan.items.push({ id: 'duihuaDora', name: FAN.duihuaDora.name, fan: FAN.duihuaDora.fan, n: nDora });
-          p.fan.total += FAN.duihuaDora.fan * nDora;
-        }
-        settleResult(g, 0, p.winTile, p.tsumo, p.fan);
-      }
-      return;
-    }
   }
 }
 
@@ -1024,7 +911,6 @@ function selfTest(runs = 100, seed = 42) {
       if (tileConservation(g) !== 64) { console.error('conservation broken', g.seed, tileConservation(g)); fails++; break; }
       for (const s of [0, 1]) {
         if (g.over) break; // winner legitimately holds the winning tile
-        if (g.pending && (g.pending.type === 'haidi' || g.pending.type === 'duihua')) break; // bonus phase: outcome decided
         const expect = 13 - 3 * g.melds[s].length;
         const len = g.hands[s].length;
         const isActing = !g.over && g.pending && (g.pending.type === 'self') && g.pending.seat === s;
@@ -1061,6 +947,9 @@ if (typeof document !== 'undefined') {
     round: 0, g: null, auto: false, speed: 500,
     tingMode: false, tingSelect: null, timer: null,
     betIdx: 0, charIdx: 0, diffKey: 'rookie', bandIdx: 0, autoNext: false, vsTimer: null, suitTimer: null,
+    dealTimers: [], dealing: false,   // entry draw-in animation state
+    dice: null,                       // last dealer-dice roll {d1,d2,sum,dealer}
+
     unlocked: null,         // Set of unlocked CHARS ids; filled from storage on boot
     lastMult: 1,            // last rendered pass multiplier, to fire the bump animation once
   };
@@ -1085,7 +974,14 @@ if (typeof document !== 'undefined') {
   }
 
   function curChar() { return CHARS[S.charIdx]; }        // pure skin
-  function curDiff() { return DIFFS[S.diffKey]; }        // stake window + opponent + dora count
+  // Tier is derived from the chosen stake rung — no separate picker. rung 0-1 → rookie,
+  // 2-4 → expert, 5-7 → master (DIFFS[].rungs). curDiff() reads S.betIdx, so moving the stepper
+  // moves the tier with it.
+  function tierForBetIdx(i) {
+    for (const k of DIFF_ORDER) { const r = DIFFS[k].rungs; if (i >= r[0] && i <= r[1]) return k; }
+    return DIFF_ORDER[DIFF_ORDER.length - 1];
+  }
+  function curDiff() { return DIFFS[tierForBetIdx(S.betIdx)]; }   // opponent + dora, keyed off the stake
   // Which balance band the player is in, and that band's rung list.
   function bandIndexFor(credits) {
     const i = STAKE_BANDS.findIndex(b => credits <= b.max);
@@ -1094,25 +990,22 @@ if (typeof document !== 'undefined') {
   function bandRungs(credits) { return STAKE_BANDS[bandIndexFor(credits)].rungs; }
   function curBet() { return bandRungs(S.credits)[S.betIdx]; }
 
-  // Selectable rungs for a tier: its fixed slot window inside the band, trimmed to what the
-  // balance can actually cover. The wager IS both the loss cap and the entry threshold, so a rung
-  // priced above the balance is unplayable rather than merely risky — and that affordability trim
-  // is the ONLY gate. There is no artificial tier threshold: every band offers all three tables,
-  // and the only players who cannot reach the master table are those who cannot cover its
-  // cheapest loss cap.
-  // Returns { lo, hi } indices into the band's rungs, or null when even the tier's cheapest rung
-  // is unaffordable.
-  function betWindow(diff, credits) {
-    const rungs = bandRungs(credits);
-    const M = CONFIG.LOSS_CAP_MULT;
-    const lo = diff.slots[0];
-    let hi = Math.min(diff.slots[1], rungs.length - 1);
-    while (hi >= lo && rungs[hi] * M > credits) hi--;
-    return hi < lo ? null : { lo, hi };
+  // The single stepper now spans ALL 8 rungs of the band (tier is derived from where it lands),
+  // so the selectable window is just the whole band. Affordability is NOT filtered here — a
+  // player short of the requirement can still browse and select any rung, the number just turns
+  // red and 開局 raises the top-up prompt. Hiding the stake they cannot afford hides the reason to
+  // top up, which is the one moment the screen is actually trying to create.
+  function betWindow(credits) {
+    return { lo: 0, hi: bandRungs(credits).length - 1 };
   }
-  // what the balance would have to be for this tier to open at all (its cheapest wager)
-  function tierEntryCost(diff, credits) {
-    return bandRungs(credits)[diff.slots[0]] * CONFIG.LOSS_CAP_MULT;
+  // the wager IS the entry threshold, so this is both "most you can lose" and "balance required"
+  function wagerOf(bet) { return bet * CONFIG.LOSS_CAP_MULT; }
+  function canAfford(bet) { return wagerOf(bet) <= S.credits; }
+  // highest rung in the band the balance actually covers; null when even the cheapest is short
+  function topAffordable() {
+    const rungs = bandRungs(S.credits);
+    for (let i = rungs.length - 1; i >= 0; i--) if (canAfford(rungs[i])) return i;
+    return null;
   }
   const $ = id => document.getElementById(id);
 
@@ -1144,9 +1037,20 @@ if (typeof document !== 'undefined') {
     }
   }
 
+  // Dealer is decided by rolling two dice every round: ODD total → player (0) deals,
+  // EVEN total → opponent (1) deals. Uses Math.random, NOT g.rng — it is settled before the
+  // wall is seeded (nextGameSeed takes the dealer as input), so it can't desync the wall. The
+  // dice animation later just replays these exact faces, so what the player sees is the real roll.
+  function rollDealerDice() {
+    const d1 = 1 + Math.floor(Math.random() * 6);
+    const d2 = 1 + Math.floor(Math.random() * 6);
+    return { d1, d2, sum: d1 + d2, dealer: ((d1 + d2) % 2 === 1) ? 0 : 1 };
+  }
+
   function newRound() {
     S.round++;
-    const dealer = (S.round % 2 === 1) ? 0 : 1;
+    S.dice = rollDealerDice();       // decides the dealer; the splash replays these faces
+    const dealer = S.dice.dealer;
     const seed = nextGameSeed(S.machine, dealer);
     const diff = curDiff();
     const bet = curBet();
@@ -1178,10 +1082,169 @@ if (typeof document !== 'undefined') {
       ov.style.display = 'none';
       ov.onclick = null;
       stampSuit();          // hand the tile off to the top bar so the eye follows it
-      drive();
+      playDiceRoll(() => playDrawIn(S.g, drive));  // dice → seat the 莊 → draw-in → real play
     };
     ov.onclick = finish;
     S.suitTimer = setTimeout(finish, CONFIG.SUIT_SPLASH_MS);
+  }
+
+  // 3x3 pip layout per die value
+  const DIE_PIPS = {
+    1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8],
+  };
+  function renderDie(el, val) {
+    el.innerHTML = '';
+    const on = new Set(DIE_PIPS[val] || []);
+    for (let i = 0; i < 9; i++) {
+      const p = document.createElement('span');
+      p.className = 'pip' + (on.has(i) ? ' on' : '');
+      el.appendChild(p);
+    }
+  }
+  // reveal the 莊 marker at the winning seat, with a landing pop
+  function seatDealer(dealer) {
+    const you = $('dealer-you'), ai = $('dealer-ai');
+    you.style.display = dealer === 0 ? 'inline-flex' : 'none';
+    ai.style.display = dealer === 1 ? 'inline-flex' : 'none';
+    const mark = dealer === 0 ? you : ai;
+    mark.classList.remove('land'); void mark.offsetWidth; mark.classList.add('land');
+  }
+  // Dealer dice roll, played ON the table (no dim, no text): tumble two dice at the centre,
+  // lock onto the roll that already decided the dealer, then seat the 莊 marker — the marker's
+  // side is the whole announcement. Tap anywhere to skip. The element is pointer-events:none, so
+  // the skip listens on the document instead of the element.
+  function playDiceRoll(done) {
+    const ov = $('dice-anim');
+    const roll = S.dice || rollDealerDice();
+    const d1 = $('die-1'), d2 = $('die-2');
+    ov.style.display = 'flex';
+    d1.classList.remove('settle'); d2.classList.remove('settle');
+    d1.classList.add('rolling'); d2.classList.add('rolling');
+    clearDealTimers();
+    // tumble: flash random faces while rolling
+    const spin = setInterval(() => {
+      renderDie(d1, 1 + Math.floor(Math.random() * 6));
+      renderDie(d2, 1 + Math.floor(Math.random() * 6));
+    }, 70);
+    S.dealTimers.push(spin);   // tracked so a table reset can stop it (cleared as interval too)
+
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearInterval(spin);
+      clearDealTimers();
+      document.removeEventListener('click', skip, true);
+      ov.style.display = 'none';
+      d1.classList.remove('rolling', 'settle'); d2.classList.remove('rolling', 'settle');
+      seatDealer(roll.dealer);
+      done && done();
+    };
+    const skip = (ev) => { ev.preventDefault(); ev.stopPropagation(); finish(); };
+    document.addEventListener('click', skip, true);
+    const lock = () => {
+      clearInterval(spin);
+      d1.classList.remove('rolling'); d2.classList.remove('rolling');
+      d1.classList.add('settle'); d2.classList.add('settle');
+      renderDie(d1, roll.d1); renderDie(d2, roll.d2);
+      S.dealTimers.push(setTimeout(finish, CONFIG.DICE_HOLD_MS));
+    };
+    S.dealTimers.push(setTimeout(lock, CONFIG.DICE_ROLL_MS));
+  }
+
+  // Entry draw-in animation. Pure presentation: never touches g's state, the wall, or the RNG —
+  // it only reorders tiles for display, then render() rebuilds the true hand. Sequence:
+  //   1. player draws 13 tiles left→right, face-up in a scrambled order ("此時牌是亂的")
+  //   2. opponent draws 13 backs right→left at the same time
+  //   3. player covers (flip to backs)
+  //   4. player flips back up, now sorted ("再掀起時，排序理好")
+  // Tap anywhere to fast-forward. Skipped entirely in full auto-play (never reaches here).
+  function dealtHand13(g) {
+    // the 13 dealt tiles = concealed hand minus the dealer's opening (14th) draw
+    const h = g.hands[0].slice();
+    if (g.dealer === 0 && g.lastDrawn != null) {
+      const i = h.indexOf(g.lastDrawn);
+      if (i >= 0) h.splice(i, 1);
+    }
+    return h;
+  }
+  function shuffleForDisplay(arr) {
+    // visual-only scramble; must NOT use g.rng() or the wall would desync — Math.random is fine here
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+  function clearDealTimers() { S.dealTimers.forEach(clearTimeout); S.dealTimers = []; }
+  // flip every tile in `el`: rotate the current faces out, swap content via build(), rotate in
+  function flipHand(el, build, done) {
+    const d = CONFIG.DEAL_FLIP_MS;
+    el.style.setProperty('--fd', d + 'ms');
+    el.classList.add('flip-out');
+    S.dealTimers.push(setTimeout(() => {
+      build();
+      el.classList.remove('flip-out');
+      el.classList.add('flip-in');
+      S.dealTimers.push(setTimeout(() => { el.classList.remove('flip-in'); done && done(); }, d));
+    }, d));
+  }
+  function playDrawIn(g, done) {
+    const ph = $('p-hand'), ah = $('ai-hand');
+    clearDealTimers();
+    // fresh table: clear stale tiles so nothing from the covered splash bleeds through
+    for (const id of ['p-hand', 'ai-hand', 'p-melds', 'ai-melds', 'p-river', 'ai-river', 'ting-live', 'actions']) {
+      $(id).innerHTML = '';
+    }
+    S.dealing = true;
+    const deal = dealtHand13(g);
+    const shuffled = shuffleForDisplay(deal);
+    const n = shuffled.length;
+    const stag = CONFIG.DEAL_STAGGER_MS, enter = CONFIG.DEAL_ENTER_MS;
+    // player: face-up, scrambled, left→right
+    shuffled.forEach((t, i) => {
+      const e = tileEl(t);
+      e.classList.add('deal-in');
+      e.style.animationDelay = (i * stag) + 'ms';
+      e.style.animationDuration = enter + 'ms';
+      ph.appendChild(e);
+    });
+    // opponent: backs, right→left (rightmost lands first)
+    for (let i = 0; i < n; i++) {
+      const e = tileEl(0, { back: true });
+      e.classList.add('deal-in');
+      e.style.animationDelay = ((n - 1 - i) * stag) + 'ms';
+      e.style.animationDuration = enter + 'ms';
+      ah.appendChild(e);
+    }
+
+    const finish = () => {
+      clearDealTimers();
+      S.dealing = false;
+      document.removeEventListener('click', skip, true);
+      done && done();
+    };
+    const skip = (ev) => { if (S.dealing) { ev.preventDefault(); ev.stopPropagation(); finish(); } };
+    document.addEventListener('click', skip, true);
+
+    const drawInMs = (n - 1) * stag + enter;
+    S.dealTimers.push(setTimeout(() => {
+      // 3. cover — flip player's tiles face-down
+      flipHand(ph, () => {
+        ph.innerHTML = '';
+        for (let i = 0; i < n; i++) ph.appendChild(tileEl(0, { back: true }));
+      }, () => {
+        S.dealTimers.push(setTimeout(() => {
+          // 4. reveal — flip up, now sorted (full current hand, so it matches render() exactly)
+          const sorted = g.hands[0].slice(); sortHand(sorted);
+          flipHand(ph, () => {
+            ph.innerHTML = '';
+            for (const t of sorted) ph.appendChild(tileEl(t));
+          }, finish);
+        }, 160));
+      });
+    }, drawInMs + 120));
   }
   // replay the small stamp pop on the top-bar readout
   function stampSuit() {
@@ -1253,6 +1316,9 @@ if (typeof document !== 'undefined') {
     S.lastMult = 1;
     S.g = null;
     clearTimeout(S.timer);
+    clearDealTimers(); S.dealing = false;
+    for (const id of ['p-hand', 'ai-hand']) $(id).classList.remove('flip-out', 'flip-in');
+    $('dice-anim').style.display = 'none';
     for (const id of ['ai-hand', 'ai-melds', 'ai-river', 'p-hand', 'p-melds', 'p-river', 'ting-live', 'actions']) {
       $(id).innerHTML = '';
     }
@@ -1260,7 +1326,6 @@ if (typeof document !== 'undefined') {
       $(id).style.display = 'none';
     }
     $('opp-char').style.display = 'none';
-    $('bonus').style.display = 'none';
     $('round-num').textContent = '-';
     $('suit-name').textContent = '-';   // innerHTML face is rebuilt by render() on the next round
     $('suit-stamp').style.display = 'none';
@@ -1296,44 +1361,40 @@ if (typeof document !== 'undefined') {
       wrap.appendChild(slot);
     });
   }
-  // The three things that actually differ between tables: how much you may stake, how many dora
-  // are in play, and how the opponent plays. The rules are the same everywhere, so there is no
-  // perk line any more — nothing here is a player ability.
+  // Player-facing wording: the stepper picks the STAKE (底注) and the panel spells out what the
+  // worst case costs (stake × LOSS_CAP_MULT). Those are the only two money numbers a player needs
+  // — the ladder's range, the band boundaries and the entry threshold are all internal bookkeeping
+  // and were only ever noise on this screen.
   function renderBetSel() {
-    const diff = curDiff();
-    const M = CONFIG.LOSS_CAP_MULT;
     const rungs = bandRungs(S.credits);
-    DIFF_ORDER.forEach(k => {
-      const el = $('diff-' + k);
-      el.classList.toggle('active', k === S.diffKey);
-      el.classList.toggle('locked', !betWindow(DIFFS[k], S.credits));
-    });
-    $('bs-dora').textContent = TEXT.tierDora + diff.dora + TEXT.tierDoraUnit;
-    $('bs-ainote').textContent = diff.aiNote;
+    S.betIdx = Math.min(Math.max(S.betIdx, 0), rungs.length - 1);   // keep inside the band
+    S.diffKey = tierForBetIdx(S.betIdx);                            // tier follows the stake
+    const diff = DIFFS[S.diffKey];
+    // tier block: name + colour theme (green / blue / gold) driven by the derived tier
+    const tier = $('bs-tier');
+    tier.textContent = diff.name;
+    tier.className = 'bs-tier tier-' + S.diffKey;
+    // revealed info (依 5.8.C / 5.9): 寶牌張數、對手強度、出牌秒數
+    $('bs-dora-n').textContent = diff.dora;
+    $('bs-strength').textContent = diff.strength;
+    $('bs-turnsec').textContent = diff.turnSec;
     $('bs-credits').textContent = S.credits;
-    const btn = $('bs-start');
-    const win = betWindow(diff, S.credits);
-    if (!win) {
-      // Out of reach. Deliberately still selectable: seeing what the next table costs is the
-      // hook that makes it worth playing towards, which a greyed-out unclickable tab loses.
-      $('bs-range').textContent = TEXT.tierNeedPrefix + tierEntryCost(diff, S.credits);
-      $('bs-amount').textContent = '-';
-      $('bs-base').textContent = '-';
-      btn.disabled = true;
-      btn.textContent = TEXT.betShort;
-      $('bs-minus').disabled = true;
-      $('bs-plus').disabled = true;
-      return;
-    }
-    S.betIdx = Math.min(Math.max(S.betIdx, win.lo), win.hi);   // keep the stake inside the window
     const bet = curBet();
-    $('bs-range').textContent = TEXT.tierBet + (rungs[win.lo] * M) + TEXT.tierBetSep + (rungs[win.hi] * M);
-    $('bs-amount').textContent = bet * M;
-    $('bs-base').textContent = bet;
+    $('bs-amount').textContent = bet;
+    // requirement = stake × 16, shown for every rung, red when the balance does not cover it.
+    // 開局 stays enabled either way — pressing it is what surfaces the top-up prompt.
+    const need = $('bs-need');
+    need.textContent = wagerOf(bet);
+    need.classList.toggle('short', !canAfford(bet));
+    const btn = $('bs-start');
     btn.disabled = false;
     btn.textContent = TEXT.betStart;
-    $('bs-minus').disabled = S.betIdx <= win.lo;
-    $('bs-plus').disabled = S.betIdx >= win.hi;
+    $('bs-minus').disabled = S.betIdx <= 0;
+    $('bs-plus').disabled = S.betIdx >= rungs.length - 1;
+  }
+
+  function showTopup() {
+    $('topup').style.display = 'flex';
   }
 
   function drive() {
@@ -1344,7 +1405,7 @@ if (typeof document !== 'undefined') {
     if (g.over) { onGameOver(); return; }
     const p = g.pending;
     const humanTurn = (p.type === 'self' && p.seat === 0) || (p.type === 'claim' && p.seat === 0) ||
-                      (p.type === 'rob' && p.seat === 0) || p.type === 'haidi' || p.type === 'duihua';
+                      (p.type === 'rob' && p.seat === 0);
     if (humanTurn && !S.auto) return; // wait for clicks
     const delay = p.type === 'draw' ? 120 : S.speed;
     S.timer = setTimeout(() => { act(g, aiDecision(g)); drive(); }, S.auto ? Math.min(delay, 200) : delay);
@@ -1379,11 +1440,17 @@ if (typeof document !== 'undefined') {
     // means what they picked, so 自動下一局 goes back to the bet screen — silently re-pricing
     // someone's bet is exactly the kind of thing that reads as manipulation. Full auto-play (a
     // dev/demo loop) clamps and keeps rolling instead.
-    const win = betWindow(curDiff(), S.credits);
+    const win = betWindow(S.credits);
     const bandMoved = bandIndexFor(S.credits) !== S.bandIdx;
-    if (!win || !(S.auto || S.autoNext)) { showBetSel(); return; }
-    if (S.auto) S.betIdx = Math.min(Math.max(S.betIdx, win.lo), win.hi);
-    else if (bandMoved || S.betIdx < win.lo || S.betIdx > win.hi) { showBetSel(); return; }
+    if (!(S.auto || S.autoNext)) { showBetSel(); return; }
+    if (S.auto) {
+      // dev/demo loop: drop to the biggest stake still covered rather than stalling on the prompt
+      const top = topAffordable();
+      if (top === null) { showBetSel(); return; }
+      S.betIdx = Math.min(Math.max(S.betIdx, win.lo), top);
+    } else if (bandMoved || S.betIdx < win.lo || S.betIdx > win.hi || !canAfford(curBet())) {
+      showBetSel(); return;   // stake no longer means what they picked, or no longer affordable
+    }
     // both auto paths keep stake + difficulty and re-draw the opponent; only the reveal differs
     if (S.auto) { rollOpponent(); newRound(); }   // full auto-play: silent, no splash
     else playVsThenStart();                       // 自動下一局: VS splash reveals the new opponent
@@ -1416,8 +1483,7 @@ if (typeof document !== 'undefined') {
     $('ting-ai').style.display = g.ting[1] ? 'inline-flex' : 'none';
 
     // persistent waits panel while the player is in declared ting
-    const roundDecided = g.over ||
-      (g.pending && (g.pending.type === 'end' || g.pending.type === 'haidi' || g.pending.type === 'duihua'));
+    const roundDecided = g.over || (g.pending && g.pending.type === 'end');
     const tl = $('ting-live');
     if (g.ting[0] && !roundDecided) buildWaitsPanel(tl, liveWaitsInfo(), null);
     else tl.innerHTML = '';
@@ -1443,49 +1509,7 @@ if (typeof document !== 'undefined') {
     renderRiver($('p-river'), g.rivers[0], g, 0);
     renderHand();
     renderActions();
-    renderBonus();
     renderDebug();
-  }
-
-  function renderBonus() {
-    const g = S.g;
-    const p = g.pending;
-    const bz = $('bonus');
-    if (!p || (p.type !== 'haidi' && p.type !== 'duihua')) {
-      bz.style.display = 'none';
-      document.body.classList.remove('bonus-open');
-      return;
-    }
-    bz.style.display = 'flex';
-    $('bonus-title').textContent = p.type === 'haidi' ? TEXT.haidiTitle : TEXT.duihuaTitle;
-    $('bonus-note').textContent =
-      `${p.type === 'haidi' ? TEXT.haidiNote : TEXT.duihuaNote}｜${TEXT.bonusLeft} ${(p.need || 3) - p.picks.length} ${TEXT.bonusUnit}`;
-    document.body.classList.add('bonus-open');
-    const poolEl = $('bonus-pool'); poolEl.innerHTML = '';
-    for (let i = 0; i < 10; i++) {
-      let revealed = null, isRest = false;
-      if (p.type === 'haidi') {
-        if (p.picks.includes(i)) revealed = p.pool[i];
-        else if (p.done) { revealed = { tile: p.pool[i].tile, hit: false }; isRest = true; }
-      } else {
-        revealed = p.picks.find(x => x.i === i) || null;
-        if (!revealed && p.done && p.rest) {
-          const r = p.rest.find(x => x.i === i);
-          if (r) { revealed = { tile: r.tile, hit: false }; isRest = true; }
-        }
-      }
-      let e;
-      if (revealed) {
-        e = tileEl(revealed.tile, { cls: revealed.hit ? 'bonus-hit' : isRest ? 'bonus-rest' : 'bonus-miss' });
-      } else {
-        e = tileEl(0, { back: true });
-        if (!S.auto && !p.done) { e.classList.add('clickable'); e.onclick = () => humanAct({ t: 'pick', i }); }
-      }
-      poolEl.appendChild(e);
-    }
-    const cf = $('bonus-confirm');
-    cf.style.display = (p.done && !S.auto) ? 'inline-block' : 'none';
-    cf.onclick = () => humanAct({ t: 'resolve' });
   }
 
   function renderMelds(el, melds) {
@@ -1535,10 +1559,6 @@ if (typeof document !== 'undefined') {
     }
     const showGap = p.type === 'self' && p.seat === 0 && g.hasDrawn &&
                     g.hands[0].length === 14 - 3 * g.melds[0].length;
-    // duihua: glow hand tiles that match revealed hits
-    const hitKinds = new Set(
-      p.type === 'duihua' ? p.picks.filter(x => x.hit).map(x => x.tile) : []
-    );
     g.hands[0].forEach((t, idx) => {
       if (showGap && idx === g.hands[0].length - 1) {
         const gap = document.createElement('div'); gap.className = 'hand-gap';
@@ -1550,8 +1570,7 @@ if (typeof document !== 'undefined') {
         cls: (canDiscard && !locked ? 'clickable' : '') +
              (S.tingMode && tingOK && !tingOK.has(t) ? ' dim' : '') +
              (isSel ? ' sel' : '') +
-             (g.doras.includes(t) ? ' dora' : '') +
-             (hitKinds.has(t) ? ' match-glow' : ''),
+             (g.doras.includes(t) ? ' dora' : ''),
       });
       if (canDiscard && !locked && (!S.tingMode || (tingOK && tingOK.has(t)))) {
         e.onclick = () => {
@@ -1743,19 +1762,22 @@ if (typeof document !== 'undefined') {
     $('debug-toggle').onclick = () => {
       const b = $('debug-body'); b.style.display = b.style.display === 'none' ? 'block' : 'none';
     };
-    // the stepper only moves inside this tier's window; renderBetSel re-clamps and re-disables
+    // one stepper spans all 8 rungs; renderBetSel re-clamps, re-derives the tier, and re-disables
     $('bs-minus').onclick = () => { S.betIdx--; renderBetSel(); };
     $('bs-plus').onclick = () => { S.betIdx++; renderBetSel(); };
-    DIFF_ORDER.forEach(k => { $('diff-' + k).onclick = () => { S.diffKey = k; renderBetSel(); }; });
     $('bs-start').onclick = () => {
-      if (!betWindow(curDiff(), S.credits)) return;
+      // the balance check lives here rather than in the stepper: an unaffordable stake is
+      // selectable so the player can see what it costs, and pressing 開局 is the moment to ask
+      // for a top-up instead of silently doing nothing
+      if (!canAfford(curBet())) { showTopup(); return; }
       $('betsel').style.display = 'none';
       playVsThenStart();   // roll a random opponent + VS splash, then newRound
     };
+    $('topup-close').onclick = () => { $('topup').style.display = 'none'; };
     showBetSel();
   }
   init();
-  setTimeout(() => selfTest(10, 42), 800); // quick smoke in browser; full run lives in sim/harness.js
+  setTimeout(() => selfTest(10, 42), 800); // quick smoke test in browser
 }
 
 // ---- 9. Node export shim ----

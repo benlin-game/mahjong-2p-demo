@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>雀聖對決</title>
-<link rel="stylesheet" href="style.css?v=13">
+<link rel="stylesheet" href="style.css?v=19">
 </head>
 <body>
   <div id="topbar">
@@ -58,30 +58,27 @@
     <div id="bs-roster"></div>
     <div id="betsel-card">
       <div class="bs-logo"><img src="assets/logo.png?v=6" alt="雀聖對決"></div>
-      <div class="bs-difftabs">
-        <button class="bs-difftab" id="diff-rookie">新手桌</button>
-        <button class="bs-difftab" id="diff-expert">高手桌</button>
-        <button class="bs-difftab" id="diff-master">大師桌</button>
-      </div>
+      <div id="bs-tier" class="bs-tier tier-rookie">新手桌</div>
       <div class="bs-mid">
         <div class="bs-panel">
-          <div class="bs-line">贏分無上限，最多輸 16 倍</div>
-          <div class="bs-line big" id="bs-range"></div>
-          <div class="bs-line">底注 <span id="bs-base" class="bs-req">100</span></div>
-          <div class="bs-line" id="bs-dora"></div>
-          <div class="bs-line small" id="bs-ainote"></div>
-          <div class="bs-line small">持分 <span id="bs-credits"></span></div>
+          <div class="bs-line">持有資產需 ≧ <span id="bs-need" class="bs-req">1600</span></div>
+          <div class="bs-line">寶牌：<b id="bs-dora-n" class="bs-val">1</b> 張</div>
+          <div class="bs-line">對手強度：<b id="bs-strength" class="bs-val">普通</b></div>
+          <div class="bs-line">出牌秒數：<b id="bs-turnsec" class="bs-val">8</b> 秒</div>
         </div>
       </div>
+      <div class="bs-line small">贏分無上限，最多輸 16 倍</div>
+      <div class="bs-line bs-choose">下方選擇投注金額</div>
       <div class="bs-bottom">
         <div class="bs-stepper">
           <button id="bs-minus">−</button>
-          <div class="bs-amount-box"><b id="bs-amount">1600</b><span>總投注額（最多輸）</span></div>
+          <div class="bs-amount-box"><b id="bs-amount">100</b><span>投注額</span></div>
           <button id="bs-plus">＋</button>
         </div>
         <button id="bs-start">開局</button>
         <label id="bs-autonext-label"><input type="checkbox" id="bs-autonext">自動<br>下一局</label>
       </div>
+      <div class="bs-line small">持分 <span id="bs-credits"></span></div>
     </div>
   </div>
 
@@ -91,6 +88,13 @@
       <div id="vs-word">VS</div>
       <img id="vs-img" alt="">
       <div id="vs-name"></div>
+    </div>
+  </div>
+
+  <div id="dice-anim">
+    <div id="dice-stage">
+      <span class="die" id="die-1"></span>
+      <span class="die" id="die-2"></span>
     </div>
   </div>
 
@@ -105,12 +109,10 @@
     </div>
   </div>
 
-  <div id="bonus">
-    <div id="bonus-card">
-      <div id="bonus-title"></div>
-      <div id="bonus-note"></div>
-      <div id="bonus-pool"></div>
-      <button id="bonus-confirm">開牌結算</button>
+  <div id="topup">
+    <div id="topup-card">
+      <div id="topup-title">請儲值</div>
+      <button id="topup-close">確定</button>
     </div>
   </div>
 
@@ -137,7 +139,7 @@
     <div id="debug-body"></div>
   </div>
 
-  <script src="data.js?v=13"></script>
-  <script src="game.js?v=16"></script>
+  <script src="data.js?v=22"></script>
+  <script src="game.js?v=23"></script>
 </body>
 </html>
