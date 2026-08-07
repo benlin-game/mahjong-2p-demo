@@ -983,27 +983,32 @@ if (typeof document !== 'undefined') {
   }
   function curDiff() { return DIFFS[tierForBetIdx(S.betIdx)]; }   // opponent + dora, keyed off the stake
   // Which balance band the player is in, and that band's rung list.
+  //
+  // The band is judged when the player SITS DOWN AT THE MACHINE — i.e. on the bet screen — and
+  // then stays frozen for as long as they keep playing, however the balance swings. It is not a
+  // per-round decision: a machine's stake ladder is a property of the machine you sat down at,
+  // so winning or losing mid-session must never re-price the seat under the player. Standing up
+  // (returning to the bet screen) and sitting down again is the only thing that re-judges it.
+  //
+  // Freezing the index alone would not be enough — every helper below used to look the band up
+  // from the live balance, so the same betIdx would silently point at a different stake as the
+  // balance drifted. They all read the frozen list instead.
   function bandIndexFor(credits) {
     const i = STAKE_BANDS.findIndex(b => credits <= b.max);
     return i < 0 ? STAKE_BANDS.length - 1 : i;
   }
-  function bandRungs(credits) { return STAKE_BANDS[bandIndexFor(credits)].rungs; }
-  function curBet() { return bandRungs(S.credits)[S.betIdx]; }
+  function seatAtMachine() { S.bandIdx = bandIndexFor(S.credits); }   // called on entering the bet screen
+  function curRungs() { return STAKE_BANDS[S.bandIdx].rungs; }
+  function curBet() { return curRungs()[S.betIdx]; }
 
-  // The single stepper now spans ALL 8 rungs of the band (tier is derived from where it lands),
-  // so the selectable window is just the whole band. Affordability is NOT filtered here — a
-  // player short of the requirement can still browse and select any rung, the number just turns
-  // red and 開局 raises the top-up prompt. Hiding the stake they cannot afford hides the reason to
-  // top up, which is the one moment the screen is actually trying to create.
-  function betWindow(credits) {
-    return { lo: 0, hi: bandRungs(credits).length - 1 };
-  }
-  // the wager IS the entry threshold, so this is both "most you can lose" and "balance required"
+  // the wager IS the entry threshold, so this is both "most you can lose" and "balance required".
+  // Affordability stays live against the real balance — that one is physics, not pricing: you
+  // cannot stake more than you are holding, whatever machine you are sitting at.
   function wagerOf(bet) { return bet * CONFIG.LOSS_CAP_MULT; }
   function canAfford(bet) { return wagerOf(bet) <= S.credits; }
-  // highest rung in the band the balance actually covers; null when even the cheapest is short
+  // highest rung on this machine the balance actually covers; null when even the cheapest is short
   function topAffordable() {
-    const rungs = bandRungs(S.credits);
+    const rungs = curRungs();
     for (let i = rungs.length - 1; i >= 0; i--) if (canAfford(rungs[i])) return i;
     return null;
   }
@@ -1053,13 +1058,16 @@ if (typeof document !== 'undefined') {
     const dealer = S.dice.dealer;
     const seed = nextGameSeed(S.machine, dealer);
     const diff = curDiff();
-    const bet = curBet();
-    S.bandIdx = bandIndexFor(S.credits);   // frozen for the round; only the bet screen re-reads it
+    const bet = curBet();   // reads the band frozen when the player sat down, not the live balance
     // the tier only carries reward + opponent strength; the rule set is identical everywhere
     const sk = { doraCount: diff.dora, defendPush: diff.defendPush };
     S.g = newGame(seed, dealer, bet, sk);
     S.tingMode = false;
-    S.lastMult = 1;          // fresh round starts at x1; don't carry last round's bump state
+    // Reset the felt the instant the round is seeded, not when the tiles are dealt: the splashes
+    // that follow (dora, dice) sit on an undimmed table, so the finished round's tiles, 莊 marker
+    // and hand count would still be readable behind the dice. clearTableTiles also resets lastMult.
+    clearTableTiles();
+    renderRoundMeta(S.g);
     showOppChar();
     hideOverlay();
     playSuitThenDrive();
@@ -1193,9 +1201,8 @@ if (typeof document !== 'undefined') {
   function playDrawIn(g, done) {
     const ph = $('p-hand'), ah = $('ai-hand');
     clearDealTimers();
-    // fresh table: clear stale tiles so nothing from the covered splash bleeds through
     for (const id of ['p-hand', 'ai-hand', 'p-melds', 'ai-melds', 'p-river', 'ai-river', 'ting-live', 'actions']) {
-      $(id).innerHTML = '';
+      $(id).innerHTML = '';   // belt-and-braces: newRound already wiped these
     }
     S.dealing = true;
     const deal = dealtHand13(g);
@@ -1311,24 +1318,31 @@ if (typeof document !== 'undefined') {
     S.lastMult = mult;
   }
 
-  // wipe the table back to a fresh "just sat down" state (no tiles from the finished round)
-  function clearTable() {
+  // Wipe everything the finished round drew on the felt — tiles, melds, rivers, and the
+  // per-round markers (莊, 聽, 過水倍數). Kept separate from clearTable() because a new round
+  // needs this too: the dice roll plays ON the table with no dim, so anything left over from
+  // the last round would sit in plain sight behind it. render() rebuilds all of it.
+  function clearTableTiles() {
     S.lastMult = 1;
-    S.g = null;
-    clearTimeout(S.timer);
-    clearDealTimers(); S.dealing = false;
     for (const id of ['p-hand', 'ai-hand']) $(id).classList.remove('flip-out', 'flip-in');
-    $('dice-anim').style.display = 'none';
     for (const id of ['ai-hand', 'ai-melds', 'ai-river', 'p-hand', 'p-melds', 'p-river', 'ting-live', 'actions']) {
       $(id).innerHTML = '';
     }
-    for (const id of ['dealer-you', 'dealer-ai', 'mult-badge', 'ting-you', 'ting-ai']) {
+    for (const id of ['dealer-you', 'dealer-ai', 'mult-badge', 'ting-you', 'ting-ai', 'suit-stamp']) {
       $(id).style.display = 'none';
     }
+  }
+
+  // wipe the table back to a fresh "just sat down" state (no tiles from the finished round)
+  function clearTable() {
+    S.g = null;
+    clearTimeout(S.timer);
+    clearDealTimers(); S.dealing = false;
+    $('dice-anim').style.display = 'none';
+    clearTableTiles();
     $('opp-char').style.display = 'none';
     $('round-num').textContent = '-';
     $('suit-name').textContent = '-';   // innerHTML face is rebuilt by render() on the next round
-    $('suit-stamp').style.display = 'none';
     $('suit-anim').style.display = 'none';
     clearTimeout(S.suitTimer);
     $('wall-count').textContent = '-';
@@ -1337,9 +1351,12 @@ if (typeof document !== 'undefined') {
   }
 
   // --- bet selection screen (entry + after every settlement) ---
+  // Standing up from the machine and picking one again — the only moment the balance band is
+  // re-judged. Everything downstream of 開局 runs on the band frozen here.
   function showBetSel() {
     hideOverlay();
     clearTable();
+    seatAtMachine();
     $('betsel').style.display = 'flex';
     renderRoster();
     renderBetSel();
@@ -1365,8 +1382,13 @@ if (typeof document !== 'undefined') {
   // worst case costs (stake × LOSS_CAP_MULT). Those are the only two money numbers a player needs
   // — the ladder's range, the band boundaries and the entry threshold are all internal bookkeeping
   // and were only ever noise on this screen.
+  // The single stepper spans ALL 8 rungs of the machine's band (the tier is derived from where it
+  // lands), so there is no narrower window to select within. Affordability is NOT filtered here —
+  // a player short of the requirement can still browse and select any rung, the number just turns
+  // red and 開局 raises the top-up prompt. Hiding the stake they cannot afford hides the reason to
+  // top up, which is the one moment the screen is actually trying to create.
   function renderBetSel() {
-    const rungs = bandRungs(S.credits);
+    const rungs = curRungs();
     S.betIdx = Math.min(Math.max(S.betIdx, 0), rungs.length - 1);   // keep inside the band
     S.diffKey = tierForBetIdx(S.betIdx);                            // tier follows the stake
     const diff = DIFFS[S.diffKey];
@@ -1435,21 +1457,17 @@ if (typeof document !== 'undefined') {
 
   function advanceAfterSettle() {
     clearTimeout(S.timer);
-    // Winning or losing can move the player across a band boundary, which swaps the entire rung
-    // list under them, or make the locked-in stake unaffordable. Either way the stake no longer
-    // means what they picked, so 自動下一局 goes back to the bet screen — silently re-pricing
-    // someone's bet is exactly the kind of thing that reads as manipulation. Full auto-play (a
-    // dev/demo loop) clamps and keeps rolling instead.
-    const win = betWindow(S.credits);
-    const bandMoved = bandIndexFor(S.credits) !== S.bandIdx;
+    // The stake ladder belongs to the machine, not to the round, so a swing in the balance is NOT
+    // a reason to interrupt: the player stays seated on the same rung whatever they just won or
+    // lost. The one thing that can still stop 自動下一局 is running out of money for the stake —
+    // physics, not pricing. Full auto-play (a dev/demo loop) drops a rung instead of stalling.
     if (!(S.auto || S.autoNext)) { showBetSel(); return; }
     if (S.auto) {
-      // dev/demo loop: drop to the biggest stake still covered rather than stalling on the prompt
       const top = topAffordable();
       if (top === null) { showBetSel(); return; }
-      S.betIdx = Math.min(Math.max(S.betIdx, win.lo), top);
-    } else if (bandMoved || S.betIdx < win.lo || S.betIdx > win.hi || !canAfford(curBet())) {
-      showBetSel(); return;   // stake no longer means what they picked, or no longer affordable
+      S.betIdx = Math.min(S.betIdx, top);
+    } else if (!canAfford(curBet())) {
+      showBetSel(); return;   // can no longer cover the stake — stand up and re-seat
     }
     // both auto paths keep stake + difficulty and re-draw the opponent; only the reveal differs
     if (S.auto) { rollOpponent(); newRound(); }   // full auto-play: silent, no splash
@@ -1463,12 +1481,12 @@ if (typeof document !== 'undefined') {
   }
 
   // --- rendering ---
-  function render() {
-    const g = S.g;
-    if (!g) return;
+  // Top-bar figures for the round in play. Split out of render() so a new round can refresh them
+  // the moment it is seeded — the dice roll is visible on the felt, and behind it the old round's
+  // hand count and wager would otherwise still be showing. Excludes the dora face (revealed by
+  // its own splash) and the 莊 marker (seated by the dice roll); those must stay hidden until then.
+  function renderRoundMeta(g) {
     $('round-num').textContent = S.round;
-    fillDoraFaces($('suit-name'), g, false);
-    $('suit-stamp').style.display = 'inline-flex';
     // elite hand-limit rounds end at handLimit draws/seat (not wall exhaustion),
     // so show the shared remaining-draw budget (handLimit×2 − draws used) instead of raw wall size
     $('wall-count').textContent = g.sk.handLimit
@@ -1476,6 +1494,14 @@ if (typeof document !== 'undefined') {
       : g.wall.length;
     $('credits').textContent = S.credits;
     $('wager-info').textContent = `${TEXT.wager} ${g.base * CONFIG.LOSS_CAP_MULT}（底注 ${g.base}）`;
+  }
+
+  function render() {
+    const g = S.g;
+    if (!g) return;
+    renderRoundMeta(g);
+    fillDoraFaces($('suit-name'), g, false);
+    $('suit-stamp').style.display = 'inline-flex';
     $('dealer-you').style.display = g.dealer === 0 ? 'inline-flex' : 'none';
     $('dealer-ai').style.display = g.dealer === 1 ? 'inline-flex' : 'none';
     renderPassMult(g);
